@@ -36,5 +36,7 @@ shinyUI(fluidPage(
     plotOutput("ffmcPlot"),
     plotOutput("dmcPlot"),
     plotOutput("dcPlot"),
+    plotOutput("isiPlot"),
+    plotOutput("buiPlot"),
     plotOutput("fwiPlot")
 ))

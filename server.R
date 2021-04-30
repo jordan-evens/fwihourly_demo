@@ -15,11 +15,15 @@ library(parallel)
 library(snow)
 library(fasttime)
 library(rvest)
+library(ggplot2)
 
 #~ library('devtools')
 #~ devtools::install_github('datastorm-open/suncalc')
 library(suncalc)
 
+# FIX: figure out what this should be
+DEFAULT_LATITUDE <- 55.0
+DEFAULT_LONGITUDE <- -110.0
 
 .dmcCalcPieces <- function(dmc_yda, temp, rh, prec, lat, mon, lat.adjust=TRUE) {
     #############################################################################
@@ -51,7 +55,9 @@ library(suncalc)
     #     lat.adjust:   Latitude adjustment (TRUE, FALSE, default=TRUE)
     #       
     #
-    # Returns: A single dmc value
+    # Returns: list(DMC starting point after decrease,
+    #               DMC increase during the day,
+    #               DMC decrease from yesterday that resulted in starting point)
     #
     #############################################################################
     
@@ -134,7 +140,9 @@ library(suncalc)
     #            mon:   Month (1-12)
     #     lat.adjust:   Latitude adjustment (TRUE, FALSE, default=TRUE)
     #
-    # Returns: A single dc value
+    # Returns: list(DC starting point after decrease,
+    #               DC increase during the day,
+    #               DC decrease from yesterday that resulted in starting point)
     #
     #############################################################################
     #Day length factor for DC Calculations
@@ -172,185 +180,268 @@ toDecimal <- function(t){
     return(hour(t) + (minute(t) + (second(t) / 60.0)) / 60.0)
 }
 
-hFWI <- function(weatherstream, intervals, ffmc_old=85, dmc_old=6, dc_old=15)
+.stnHFWI <- function(w, intervals, ffmc_old, dmc_old, dc_ol)
 {
-    results <- NULL
-    for (stn in unique(weatherstream$WEATHER_STATION_CODE))
+    r <- NULL
+    if (!(any(is.na(w$RH)) || any(is.na(w$WINDSPEED))))
     {
-        w <- weatherstream[WEATHER_STATION_CODE == stn]
-        if (!(any(is.na(w$RH)) || any(is.na(w$WINDSPEED))))
+        times <- suncalc::getSunlightTimes(date(unique(w$DATE)), w$LAT[[1]], w$LONG[[1]])
+        morning <- w[w$HR <= 12,]
+        after <- w[w$HR > 12,]
+        am <- morning[, sum(PREC, na.rm=TRUE), by=c('DATE')]
+        setnames(am, 'V1', 'am')
+        am$DATE <- as.character(am$DATE)
+        pm <- after[, sum(PREC, na.rm=TRUE), by=c('DATE')]
+        pm[, for_day := as.character(as.Date(DATE) + 1)]
+        pm <- pm[, -c('DATE')]
+        setnames(pm, 'V1', 'prev')
+        setnames(pm, 'for_day', 'DATE')
+        precip <- merge(am, pm)
+        precip[, PREC := am + prev]
+        daily <- NULL
+        for (year in unique(w$YR))
         {
-            times <- suncalc::getSunlightTimes(date(unique(w$DATE)), w$LATITUDE[[1]], w$LONGITUDE[[1]])
-            morning <- w[w$HOUR <= 12,]
-            after <- w[w$HOUR > 12,]
-            am <- morning[, sum(PREC, na.rm=TRUE), by=c('DATE')]
-            setnames(am, 'V1', 'am')
-            am$DATE <- as.character(am$DATE)
-            pm <- after[, sum(PREC, na.rm=TRUE), by=c('DATE')]
-            pm[, for_day := as.character(as.Date(DATE) + 1)]
-            pm <- pm[, -c('DATE')]
-            setnames(pm, 'V1', 'prev')
-            setnames(pm, 'for_day', 'DATE')
-            precip <- merge(am, pm)
-            precip[, PREC := am + prev]
-            daily <- NULL
-            for (year in unique(w$YR))
+            merged <- merge(w[YR == year & HR == 12 & MINUTE == 0, -c('PREC')],
+                            precip[,c('DATE', 'PREC')], by=c('DATE'))
+            if (0 < nrow(merged))
             {
-                merged <- merge(w[YR == year & HOUR == 12 & MINUTE == 0, -c('PREC')],
-                                precip[,c('DATE', 'PREC')], by=c('DATE'))
-                if (0 < nrow(merged))
-                {
-                    merged$DATE <- as.character(date(merged$DATE))
-                    d <- fwi(merged)
-                    d[, DMC_YDA := data.table::shift(DMC, 1, dmc_old)]
-                    d[, c('DDMC_START', 'DDMC_INC', 'DDMC_DEC') := .dmcCalcPieces(DMC_YDA, TEMP, RH, PREC, LAT, MON)]
-                    d[, DC_YDA := data.table::shift(DC, 1, dc_old)]
-                    d[, c('DDC_START', 'DDC_INC', 'DDC_DEC') := .dcCalcPieces(DC_YDA, TEMP, RH, PREC, LAT, MON)]
-                    daily <- rbind(daily, d)
-                }
-            }
-            if (!is.null(daily))
-            {
-                # want to take 0.5 mm off of the total but proportional to amounts per hour
-                today <- w[HOUR <= 17, c('ID', 'TIMESTAMP', 'DATE', 'PREC')]
-                yest <- w[HOUR > 17, c('ID', 'TIMESTAMP', 'DATE', 'PREC')]
-                sum_today <- today[, sum(PREC), by=c('ID', 'DATE')]
-                setnames(sum_today, 'V1', 'TODAY')
-                sum_yest <- yest[, sum(PREC), by=c('ID', 'DATE')]
-                setnames(sum_yest, 'V1', 'YEST')
-                yest[, DATE := as.character(as.Date(DATE) + 1)]
-                sum_prec <- merge(sum_today, sum_yest)
-                sum_prec[, TOTAL := TODAY + YEST]
-                # figure out what fraction of the total rain to be counted 1mm is
-                sum_prec[, FRACTION := ifelse(0.5 >= TOTAL, 0, (TOTAL - 0.5) / TOTAL)]
-                w <- merge(w, sum_prec[, c('ID', 'DATE', 'FRACTION')], by=c('ID', 'DATE'))
-                setnames(w, 'PREC', 'PREC_ORIG')
-                w[, PREC := PREC_ORIG * FRACTION]
-                ffmc <- daily[, c('ID', 'DATE', 'FFMC')]
-                setnames(ffmc, 'FFMC', 'DFFMC')
-                r <- copy(w)
-                r <- merge(r, daily[, c('ID', 'DATE', 'DMC', 'DC', 'BUI')], by=c('ID', 'DATE'))
-                r <- hffmc(r, time.step=1.0 / intervals, hourlyFWI=TRUE)[, -c('prec', 'fraction')]
-                names(r) <- toupper(names(r))
-                # revert to actual precip values
-                setnames(r, 'PREC_ORIG', 'PREC')
-                r <- merge(r, ffmc)
-                
-                # calculate vapour pressure deficit
-                # https://physics.stackexchange.com/questions/4343/how-can-i-calculate-vapor-pressure-deficit-from-temperature-and-relative-humidit
-                r[, VPS := 0.6108 * exp(17.27 * TEMP / (TEMP + 237.3))]
-                r[, VPA := RH / 100 * VPS]
-                r[, VPD := VPA - VPS]
-                
-                # divide DDMC_DEC proportionally among hours with rain from 1200 -> 1200
-                # split along 1200 -> 1200 line
-                # BUT rain at 12 is from 1100 to 1200, so split at 13
-                r[, FOR_DATE := ifelse(hour(TIMESTAMP) < 13, as.character(as.Date(DATE) - 1), DATE)]
-                
-                d <- daily[, c('ID', 'DATE', 'DMC', 'DC')]
-                setnames(d, 'DMC', 'DDMC')
-                setnames(d, 'DC', 'DDC')
-                r <- merge(r, d, by=c('ID', 'DATE'), all=TRUE)
-                r$DDMC <- nafill(r$DDMC, fill=dmc_old)
-                
-                
-                r$DDC <- nafill(r$DDC, fill=dc_old)
-                
-                # rain is already allocated to 1st hour past start of 6hr period
-                # tabulate rain per day
-                # FIX: probably duplicating something but just do it for now
-                prec_by_for_date <- r[, sum(PREC), by=c('FOR_DATE')]
-                setnames(prec_by_for_date, 'V1', 'DAILY_PREC')
-                
-                
-                # make it easier to compare hours within the same day, since 1200 is actually hour 0 of the day
-                #~ r[, PERIOD_HOUR := ifelse(hour(TIMESTAMP) >= 12, hour(TIMESTAMP) - 12, hour(TIMESTAMP) + 12)]
-                # BUT, ... 12 is actually 1100 - 1200
-                r[, PERIOD_HOUR := ifelse(hour(TIMESTAMP) >= 13, hour(TIMESTAMP) - 13, hour(TIMESTAMP) + 11)]
-                
-                # NOTE: include the 1.5mm that gets deducted because the daily dmc calculation subtracts it
-                #       so if we just divide proportional to all rain that will apply the reduction proportionally too
-                
-                # divide rain for each hour by the precip for that day, but need to join first so we can do that
-                r <- merge(r, prec_by_for_date, by=c('FOR_DATE'))
-                
-                # so first day probably goes from 0000 -> 1200 because it was a hard cut at midnight
-                # to deal with that, we're going to calculate the decrease to date for every hour and then
-                # add that plus any drying to DMC_YDA
-                
-                # this should be equivalent to determining the fraction of total rain for the day up to this hour, if that's easier
-                
-                # do precip calculation based on FWI FOR_DATE and VPD calculation based on calendar day
-                
-                # decrease is total decrease * fraction of rain for the day
-                r[, PREC_FRACTION := ifelse(DAILY_PREC == 0, 0, PREC / DAILY_PREC)]
-                
-                names(times) <- toupper(names(times))
-                times$LONG <- times$LON
-                times$DATE <- as.character(times$DATE)
-                times$SUNRISE <- toDecimal(times$SUNRISE)
-                times$SUNSET <- toDecimal(times$SUNSET)
-                r <- merge(r, times, by=c('DATE', 'LAT', 'LONG'))
-                
-                # need to figure out the drying hours and then what the fractional VPD for each of them is
-                drying_vpd <- r[HOUR >= as.integer(SUNRISE) & HOUR <= ceiling(SUNSET), c('DATE', 'TIMESTAMP', 'FOR_DATE', 'SUNRISE', 'SUNSET', 'VPD')]
-                daily_vpd <- drying_vpd[, sum(VPD), by=c('DATE')]
-                setnames(daily_vpd, 'V1', 'DAILY_VPD')
-                vpd <- merge(drying_vpd, daily_vpd, by=c('DATE'))
-                vpd[, VPD_FRACTION := VPD / DAILY_VPD]
-                vpd <- merge(vpd, daily[, c('DATE', 'DDMC_INC', 'DDC_INC')])
-                
-                vpd[, DMC_INC := DDMC_INC * VPD_FRACTION]
-                vpd[, DC_INC := DDC_INC * VPD_FRACTION]
-                
-                r <- merge(r, vpd[, c('TIMESTAMP', 'DMC_INC', 'DC_INC')], by=c('TIMESTAMP'), all=TRUE)
-                
-                # increase is 0 for any hour that wasn't in vpd
-                r$DMC_INC <- nafill(r$DMC_INC, fill=0)
-                r$DC_INC <- nafill(r$DC_INC, fill=0)
-                
-                d <- daily[, c('DATE', 'DDMC_DEC', 'DDC_DEC')]
-                setnames(d, 'DATE', 'FOR_DATE')
-                # wetting is a result of the previous day's rain, so need to push it back a day
-                d[, FOR_DATE := as.character(as.Date(FOR_DATE) - 1)]
-                
-                r <- merge(r, d, c('FOR_DATE'))
-                r[, DMC_DEC := PREC_FRACTION * DDMC_DEC]
-                r[, DC_DEC := PREC_FRACTION * DDC_DEC]
-                
-                # just do sum from start of period to now for hourly values
-                r[, DMC := dmc_old + cumsum(DMC_INC) - cumsum(DMC_DEC)]
-                r[, DC := dc_old + cumsum(DMC_INC) - cumsum(DMC_DEC)]
-                
-                # get rid of intermediate calculations
-                r <- r[,
-                       -c('PREC_FRACTION', 'DAILY_PREC', 'DMC_INC', 'DC_INC', 'DDMC_DEC', 'DDC_DEC', 'DMC_DEC', 'DC_DEC',
-                          'PERIOD_HOUR', 'VPS', 'VPA', 'VPD')]
-                
-                # get rid of daily values
-                r <- r[, -c('DFFMC', 'DDMC', 'DDC')]
-                
-                # recalculate hourly values for dependent indices
-                # FIX: what is fbpMod doing? this is the default value for it
-                # this might be covered by hffmc()
-                r[, ISI := cffdrs:::.ISIcalc(FFMC, WS, fbpMod = FALSE)]
-                
-                r[, BUI := cffdrs:::.buiCalc(DMC, DC)]
-                r[, FWI := cffdrs:::.fwiCalc(ISI, BUI)]
-                # taken from package code
-                r[, DSR := 0.0272 * (FWI ^ 1.77)]
-                
-                # reorder columns
-                r <- r[, c('FOR_DATE', 'TIMESTAMP', 'ID', 'DATE', 'TEMP', 'WS', 'RH',
-                           'PREC', 'LAT', 'LONG', 'YR', 'MON', 'DAY', 'HOUR',
-                           'MINUTE', 'SUNRISE', 'SUNSET', 'FFMC', 'DMC', 'DC', 'ISI',
-                           'BUI', 'FWI', 'DSR')]
-                results <- rbind(results, r)
+                merged$DATE <- as.character(date(merged$DATE))
+                d <- fwi(merged)
+                d[, DMC_YDA := data.table::shift(DMC, 1, dmc_old)]
+                d[, c('DDMC_START', 'DDMC_INC', 'DDMC_DEC') := .dmcCalcPieces(DMC_YDA, TEMP, RH, PREC, LAT, MON)]
+                d[, DC_YDA := data.table::shift(DC, 1, dc_old)]
+                d[, c('DDC_START', 'DDC_INC', 'DDC_DEC') := .dcCalcPieces(DC_YDA, TEMP, RH, PREC, LAT, MON)]
+                daily <- rbind(daily, d)
             }
         }
+        if (!is.null(daily))
+        {
+            # want to take 0.5 mm off of the total but proportional to amounts per hour
+            # CHECK: does this make more sense than just removing the first 0.5mm?
+            today <- w[HR <= 17, c('ID', 'TIMESTAMP', 'DATE', 'PREC')]
+            yest <- w[HR > 17, c('ID', 'TIMESTAMP', 'DATE', 'PREC')]
+            sum_today <- today[, sum(PREC), by=c('ID', 'DATE')]
+            setnames(sum_today, 'V1', 'TODAY')
+            sum_yest <- yest[, sum(PREC), by=c('ID', 'DATE')]
+            setnames(sum_yest, 'V1', 'YEST')
+            yest[, DATE := as.character(as.Date(DATE) + 1)]
+            sum_prec <- merge(sum_today, sum_yest)
+            sum_prec[, TOTAL := TODAY + YEST]
+            # figure out what fraction of the total rain to be counted 1mm is
+            sum_prec[, FRACTION := ifelse(0.5 >= TOTAL, 0, (TOTAL - 0.5) / TOTAL)]
+            w <- merge(w, sum_prec[, c('ID', 'DATE', 'FRACTION')], by=c('ID', 'DATE'))
+            setnames(w, 'PREC', 'PREC_ORIG')
+            w[, PREC := PREC_ORIG * FRACTION]
+            ffmc <- daily[, c('ID', 'DATE', 'FFMC')]
+            setnames(ffmc, 'FFMC', 'DFFMC')
+            r <- copy(w)
+            r <- merge(r, daily[, c('ID', 'DATE', 'DMC', 'DC', 'BUI')], by=c('ID', 'DATE'))
+            r <- hffmc(r, time.step=1.0 / intervals, hourlyFWI=TRUE)[, -c('prec', 'fraction')]
+            names(r) <- toupper(names(r))
+            # revert to actual precip values
+            setnames(r, 'PREC_ORIG', 'PREC')
+            r <- merge(r, ffmc)
+            
+            # calculate vapour pressure deficit
+            # https://physics.stackexchange.com/questions/4343/how-can-i-calculate-vapor-pressure-deficit-from-temperature-and-relative-humidit
+            r[, VPS := 0.6108 * exp(17.27 * TEMP / (TEMP + 237.3))]
+            r[, VPA := RH / 100 * VPS]
+            r[, VPD := VPA - VPS]
+            
+            # divide DDMC_DEC proportionally among hours with rain from 1200 -> 1200
+            # split along 1200 -> 1200 line
+            # BUT rain at 12 is from 1100 to 1200, so split at 13
+            # CHECK: does that mean 0000 should be in the other group of hours then?
+            r[, FOR_DATE := ifelse(hour(TIMESTAMP) < 13, DATE, as.character(as.Date(DATE) + 1))]
+            
+            d <- daily[, c('ID', 'DATE', 'DMC', 'DC')]
+            setnames(d, 'DMC', 'DDMC')
+            setnames(d, 'DC', 'DDC')
+            r <- merge(r, d, by=c('ID', 'DATE'), all=TRUE)
+            r$DDMC <- nafill(r$DDMC, fill=dmc_old)
+            
+            
+            r$DDC <- nafill(r$DDC, fill=dc_old)
+            
+            # rain is already allocated to 1st hour past start of 6hr period
+            # tabulate rain per day
+            # FIX: probably duplicating something but just do it for now
+            prec_by_for_date <- r[, sum(PREC), by=c('FOR_DATE')]
+            setnames(prec_by_for_date, 'V1', 'DAILY_PREC')
+            
+            
+            # make it easier to compare hours within the same day, since 1200 is actually hour 0 of the day
+            #~ r[, PERIOD_HOUR := ifelse(hour(TIMESTAMP) >= 12, hour(TIMESTAMP) - 12, hour(TIMESTAMP) + 12)]
+            # BUT, ... 12 is actually 1100 - 1200
+            r[, PERIOD_HOUR := ifelse(hour(TIMESTAMP) >= 13, hour(TIMESTAMP) - 13, hour(TIMESTAMP) + 11)]
+            
+            # NOTE: include the 1.5mm that gets deducted because the daily dmc calculation subtracts it
+            #       so if we just divide proportional to all rain that will apply the reduction proportionally too
+            
+            # divide rain for each hour by the precip for that day, but need to join first so we can do that
+            r <- merge(r, prec_by_for_date, by=c('FOR_DATE'))
+            
+            # so first day probably goes from 0000 -> 1200 because it was a hard cut at midnight
+            # to deal with that, we're going to calculate the decrease to date for every hour and then
+            # add that plus any drying to DMC_YDA
+            
+            # this should be equivalent to determining the fraction of total rain for the day up to this hour, if that's easier
+            
+            # do precip calculation based on FWI FOR_DATE and VPD calculation based on calendar day
+            
+            # decrease is total decrease * fraction of rain for the day
+            r[, PREC_FRACTION := ifelse(DAILY_PREC == 0, 0, PREC / DAILY_PREC)]
+            
+            names(times) <- toupper(names(times))
+            times$LONG <- times$LON
+            times$DATE <- as.character(times$DATE)
+            times$SUNRISE <- toDecimal(times$SUNRISE)
+            times$SUNSET <- toDecimal(times$SUNSET)
+            r <- merge(r, times, by=c('DATE', 'LAT', 'LONG'))
+            
+            # need to figure out the drying hours and then what the fractional VPD for each of them is
+            drying_vpd <- r[HR >= as.integer(SUNRISE) & HR <= ceiling(SUNSET), c('DATE', 'TIMESTAMP', 'FOR_DATE', 'SUNRISE', 'SUNSET', 'VPD')]
+            daily_vpd <- drying_vpd[, sum(VPD), by=c('DATE')]
+            setnames(daily_vpd, 'V1', 'DAILY_VPD')
+            vpd <- merge(drying_vpd, daily_vpd, by=c('DATE'))
+            vpd[, VPD_FRACTION := VPD / DAILY_VPD]
+            vpd <- merge(vpd, daily[, c('DATE', 'DDMC_INC', 'DDC_INC')])
+            
+            vpd[, DMC_INC := DDMC_INC * VPD_FRACTION]
+            vpd[, DC_INC := DDC_INC * VPD_FRACTION]
+            
+            r <- merge(r, vpd[, c('TIMESTAMP', 'DMC_INC', 'DC_INC')], by=c('TIMESTAMP'), all=TRUE)
+            
+            # increase is 0 for any hour that wasn't in vpd
+            r$DMC_INC <- nafill(r$DMC_INC, fill=0)
+            r$DC_INC <- nafill(r$DC_INC, fill=0)
+            
+            d <- daily[, c('DATE', 'DDMC_DEC', 'DDC_DEC')]
+            setnames(d, 'DATE', 'FOR_DATE')
+            # wetting is a result of the previous day's rain, so need to push it back a day
+            d[, FOR_DATE := as.character(as.Date(FOR_DATE) - 1)]
+            
+            r <- merge(r, d, c('FOR_DATE'))
+            r[, DMC_DEC := PREC_FRACTION * DDMC_DEC]
+            r[, DC_DEC := PREC_FRACTION * DDC_DEC]
+            
+            # just do sum from start of period to now for hourly values
+            r[, DMC := dmc_old + cumsum(DMC_INC) - cumsum(DMC_DEC)]
+            r[, DC := dc_old + cumsum(DC_INC) - cumsum(DC_DEC)]
+            
+            # get rid of intermediate calculations
+            r <- r[,
+                   -c('PREC_FRACTION', 'DAILY_PREC', 'DMC_INC', 'DC_INC', 'DDMC_DEC', 'DDC_DEC', 'DMC_DEC', 'DC_DEC',
+                      'PERIOD_HOUR', 'VPS', 'VPA', 'VPD')]
+            
+            # get rid of daily values
+            # r <- r[, -c('DFFMC', 'DDMC', 'DDC')]
+            
+            # calculate daily values
+            # NOTE: this will still vary by hour because of WS
+            r[, DISI := cffdrs:::.ISIcalc(DFFMC, WS, fbpMod = FALSE)]
+            
+            r[, DBUI := cffdrs:::.buiCalc(DDMC, DDC)]
+            r[, DFWI := cffdrs:::.fwiCalc(DISI, DBUI)]
+            # taken from package code
+            r[, DDSR := 0.0272 * (DFWI ^ 1.77)]
+            
+            
+            # recalculate hourly values for dependent indices
+            # FIX: what is fbpMod doing? this is the default value for it
+            # this might be covered by hffmc()
+            r[, ISI := cffdrs:::.ISIcalc(FFMC, WS, fbpMod = FALSE)]
+            
+            r[, BUI := cffdrs:::.buiCalc(DMC, DC)]
+            r[, FWI := cffdrs:::.fwiCalc(ISI, BUI)]
+            # taken from package code
+            r[, DSR := 0.0272 * (FWI ^ 1.77)]
+            
+            # reorder columns
+            r <- r[, c('TIMESTAMP', 'ID', 'DATE', 'TEMP', 'WS', 'RH',
+                       'PREC', 'LAT', 'LONG', 'YR', 'MON', 'DAY', 'HR',
+                       'MINUTE', 'SUNRISE', 'SUNSET',
+                       'FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR',
+                       'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
+        }
+    }
+    return(r)
+}
+
+hFWI <- function(weatherstream, intervals, ffmc_old=85, dmc_old=6, dc_old=15)
+{
+    wx <- copy(weatherstream)
+    colnames(wx) <- toupper(colnames(wx))
+    hadStn <- 'ID' %in% colnames(wx)
+    hadMinute <- 'MINUTE' %in% colnames(wx)
+    hadDate <- 'DATE' %in% colnames(wx)
+    hadLatitude <- 'LAT' %in% colnames(wx)
+    hadLongitude <- 'LONG' %in% colnames(wx)
+    hadTimestamp <- 'TIMESTAMP' %in% colnames(wx)
+    if (!hadStn)
+    {
+        wx[, ID := 'STN']
+    }
+    if (!hadMinute)
+    {
+        wx[, MINUTE := 0]
+    }
+    if (!hadDate)
+    {
+        wx[, DATE := as.character(as.Date(sprintf('%04d-%02d-%02d', YR, MON, DAY)))]
+    }
+    if (!hadLatitude)
+    {
+        wx[, LAT := DEFAULT_LATITUDE]
+    }
+    if (!hadLongitude)
+    {
+        wx[, LONG := DEFAULT_LONGITUDE]
+    }
+    if (!hadTimestamp)
+    {
+        wx[, TIMESTAMP := as_datetime(sprintf('%04d-%02d-%02d %02d:%02d:00', YR, MON, DAY, HR, MINUTE))]
+    }
+    results <- NULL
+    for (stn in unique(weatherstream$ID))
+    {
+        w <- wx[ID == stn]
+        r <- .stnHFWI(w, intervals, ffmc_old, dmc_old, dc_old)
+        results <- rbind(results, r)
+    }
+    if (!hadStn)
+    {
+        #weatherstream <- weatherstream[, -c('ID')]
+        if (!is.null(results)) { results <- results[, -c('ID')] }
+    }
+    if (!hadMinute)
+    {
+        #weatherstream <- weatherstream[, -c('MINUTE')]
+        if (!is.null(results)) { results <- results[, -c('MINUTE')] }
+    }
+    if (!hadDate)
+    {
+        #weatherstream <- weatherstream[, -c('DATE')]
+        if (!is.null(results)) { results <- results[, -c('DATE')] }
+    }
+    if (!hadLatitude)
+    {
+        #weatherstream <- weatherstream[, -c('LAT')]
+        if (!is.null(results)) { results <- results[, -c('LAT')] }
+    }
+    if (!hadLongitude)
+    {
+        #weatherstream <- weatherstream[, -c('LONG')]
+        if (!is.null(results)) { results <- results[, -c('LONG')] }
+    }
+    if (!hadTimestamp)
+    {
+        #weatherstream <- weatherstream[, -c('TIMESTAMP')]
+        if (!is.null(results)) { results <- results[, -c('TIMESTAMP')] }
     }
     return(results)
 }
+
 renderPlots <- function(input, output)
 {
     stn <- input$station
@@ -366,7 +457,7 @@ renderPlots <- function(input, output)
     df$RAINFALL[is.na(df$RAINFALL)] <- 0
     df$ID <- df$WEATHER_STATION_CODE
     df$TIMESTAMP <- df$OBSERVATION_DATE
-    df$HOUR <- hour(df$OBSERVATION_DATE)
+    df$HR <- hour(df$OBSERVATION_DATE)
     df$MINUTE <- minute(df$OBSERVATION_DATE)
     df$DATE <- as.character(date(df$OBSERVATION_DATE))
     df$PREC <- as.double(df$RAINFALL)
@@ -382,7 +473,9 @@ renderPlots <- function(input, output)
     #print(x)
 
     output$tempPlot <- renderPlot({
-        plot(TEMP ~ TIMESTAMP, x)
+        ggplot(x, aes(TIMESTAMP, TEMP)) +
+            geom_point()
+        #plot(TEMP ~ TIMESTAMP, x)
     })
     output$rhPlot <- renderPlot({
         plot(RH ~ TIMESTAMP, x)
@@ -395,15 +488,27 @@ renderPlots <- function(input, output)
     })
     output$ffmcPlot <- renderPlot({
         plot(FFMC ~ TIMESTAMP, x)
+        lines(DFFMC ~ TIMESTAMP, x)
     })
     output$dmcPlot <- renderPlot({
         plot(DMC ~ TIMESTAMP, x)
+        lines(DDMC ~ TIMESTAMP, x)
     })
     output$dcPlot <- renderPlot({
         plot(DC ~ TIMESTAMP, x)
+        lines(DDC ~ TIMESTAMP, x)
+    })
+    output$isiPlot <- renderPlot({
+        plot(ISI ~ TIMESTAMP, x)
+        lines(DISI ~ TIMESTAMP, x)
+    })
+    output$buiPlot <- renderPlot({
+        plot(BUI ~ TIMESTAMP, x)
+        lines(DBUI ~ TIMESTAMP, x)
     })
     output$fwiPlot <- renderPlot({
         plot(FWI ~ TIMESTAMP, x)
+        lines(DFWI ~ TIMESTAMP, x)
     })
 }
 # Define server logic required to draw a histogram
