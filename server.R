@@ -229,12 +229,11 @@ toDecimal <- function(t){
             sum_prec[, TOTAL := TODAY + YEST]
             # figure out what fraction of the total rain to be counted 1mm is
             sum_prec[, FRACTION := ifelse(0.5 >= TOTAL, 0, (TOTAL - 0.5) / TOTAL)]
-            w <- merge(w, sum_prec[, c('ID', 'DATE', 'FRACTION')], by=c('ID', 'DATE'))
-            setnames(w, 'PREC', 'PREC_ORIG')
-            w[, PREC := PREC_ORIG * FRACTION]
+            r <- merge(w, sum_prec[, c('ID', 'DATE', 'FRACTION')], by=c('ID', 'DATE'))
+            setnames(r, 'PREC', 'PREC_ORIG')
+            r[, PREC := PREC_ORIG * FRACTION]
             ffmc <- daily[, c('ID', 'DATE', 'FFMC')]
             setnames(ffmc, 'FFMC', 'DFFMC')
-            r <- copy(w)
             r <- merge(r, daily[, c('ID', 'DATE', 'DMC', 'DC', 'BUI')], by=c('ID', 'DATE'))
             r <- hffmc(r, time.step=1.0 / intervals, hourlyFWI=TRUE)[, -c('prec', 'fraction')]
             names(r) <- toupper(names(r))
