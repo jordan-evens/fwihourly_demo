@@ -82,9 +82,11 @@ renderPlots <- function(input, output)
             }
         }
         weatherstream[, DATE := as.character(as.Date(TIMESTAMP))]
-        weatherstream[, YR := year(as.Date(DATE))]
-        weatherstream[, MON := month(as.Date(DATE))]
-        weatherstream[, DAY := day(as.Date(DATE))]
+        weatherstream[, YR := year(TIMESTAMP)]
+        weatherstream[, MON := month(TIMESTAMP)]
+        weatherstream[, DAY := day(TIMESTAMP)]
+        weatherstream[, HR := hour(TIMESTAMP)]
+        weatherstream[, MINUTE := minute(TIMESTAMP)]
     }
     
     x <- hFWI(weatherstream)
