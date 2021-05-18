@@ -88,6 +88,27 @@ renderPlots <- function(input, output)
         weatherstream[, HR := hour(TIMESTAMP)]
         weatherstream[, MINUTE := minute(TIMESTAMP)]
     }
+    # fix stations that just don't have values for things
+    if (typeof(weatherstream$TEMP) == 'logical') {
+        weatherstream <- weatherstream[, -c('TEMP')]
+        weatherstream[, TEMP := 21.1]
+    }
+    if (typeof(weatherstream$RH) == 'logical') {
+        weatherstream <- weatherstream[, -c('RH')]
+        weatherstream[, RH := 45]
+    }
+    if (typeof(weatherstream$WS) == 'logical') {
+        weatherstream <- weatherstream[, -c('WS')]
+        weatherstream[, WS := 13]
+    }
+    if (typeof(weatherstream$PREC) == 'logical') {
+        weatherstream <- weatherstream[, -c('PREC')]
+        weatherstream[, PREC := 0]
+    }
+    weatherstream$TEMP <- nafill(weatherstream$TEMP, fill=21.1)
+    weatherstream$RH <- nafill(weatherstream$RH, fill=45)
+    weatherstream$WS <- nafill(weatherstream$WS, fill=13)
+    weatherstream$PREC <- nafill(weatherstream$PREC, fill=0)
     
     x <- hFWI(weatherstream)
     daily <- fwi(toDaily(weatherstream))
