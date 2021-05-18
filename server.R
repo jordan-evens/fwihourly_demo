@@ -19,6 +19,7 @@ library(ggplot2)
 #~ library('devtools')
 #~ devtools::install_github('datastorm-open/suncalc')
 library(suncalc)
+library(lutz)
 
 source('fwiHourly/hFWI.r')
 
@@ -37,13 +38,24 @@ renderPlots <- function(input, output)
     df$RAINFALL[is.na(df$RAINFALL)] <- 0
     df$ID <- df$WEATHER_STATION_CODE
     df$TIMESTAMP <- df$OBSERVATION_DATE
-    df$HR <- hour(df$OBSERVATION_DATE)
-    df$MINUTE <- minute(df$OBSERVATION_DATE)
-    df$DATE <- as.character(date(df$OBSERVATION_DATE))
+    # find proper time zone
+    tz <- tz_lookup_coords(df$LAT[[1]], df$LONG[[1]], method='accurate')
+    # make sure we stick with standard time and not daylight time
+    start <- lubridate::with_tz(df$TIMESTAMP[[1]], tz)
+    zone <- strftime(start, format='%Z')
+    if (nchar(zone) != 3) {
+        stop(sprintf('Expected three letter acronym for time zone but got %s', zone))
+    }
+    # change to standard time if it's daylight time
+    zone <- str_replace(zone, 'DT$', 'ST')
+    df$TIMESTAMP <- lubridate::with_tz(df$TIMESTAMP, zone)
+    df$HR <- hour(df$TIMESTAMP)
+    df$MINUTE <- minute(df$TIMESTAMP)
+    df$DATE <- as.character(date(df$TIMESTAMP))
     df$PREC <- as.double(df$RAINFALL)
-    df$YR <- year(df$OBSERVATION_DATE)
-    df$MON <- month(df$OBSERVATION_DATE)
-    df$DAY <- day(df$OBSERVATION_DATE)
+    df$YR <- year(df$TIMESTAMP)
+    df$MON <- month(df$TIMESTAMP)
+    df$DAY <- day(df$TIMESTAMP)
     df$WS <- df$ADJWINDSPEED
     df$LAT <- df$LATITUDE
     df$LONG <- df$LONGITUDE
