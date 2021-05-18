@@ -66,6 +66,8 @@ renderPlots <- function(input, output)
         colnames(h) <- c('TIMESTAMP')
         weatherstream <- merge(h, weatherstream, by=c('TIMESTAMP'), all=TRUE)
         # should have all the times we need but need to replace NA values in their data
+        # fill missing PREC values with 0 so we don't add rain
+        weatherstream$PREC <- nafill(weatherstream$PREC, fill=0)
         # just carry observations forward for now
         for (col in colnames(weatherstream))
         {
