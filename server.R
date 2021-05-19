@@ -88,10 +88,9 @@ cleanWeather <- function(wx)
     return(wx)
 }
 
-renderPlots <- function(input, output)
+getHourly <- function(stn)
 {
-    stn <- input$station
-    #print(stn)
+    
     urlStn <- sprintf("https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/14/query?where=WEATHER_STATION_CODE%%3D'%s'&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=true&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson", stn)
     #print(urlStn)
     json_cur <- jsonlite::fromJSON(urlStn, flatten=TRUE)
@@ -124,8 +123,15 @@ renderPlots <- function(input, output)
     df$WS <- df$ADJWINDSPEED
     df$LAT <- df$LATITUDE
     df$LONG <- df$LONGITUDE
-    weatherstream <- as.data.table(df)
-    weatherstream <- cleanWeather(weatherstream)
+    return(as.data.table(df))
+}
+
+renderPlots <- function(input, output)
+{
+    stn <- input$station
+    #print(stn)
+    hourly <- getHourly(stn)
+    weatherstream <- cleanWeather(hourly)
     
     x <- hFWI(weatherstream)
     daily <- fwi(toDaily(weatherstream))
