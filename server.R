@@ -23,6 +23,71 @@ library(lutz)
 
 source('fwiHourly/hFWI.r')
 
+cleanWeather <- function(wx)
+{
+    if (!isSequentialHours(wx))
+    {
+        # need to fix weather
+        start <- min(wx$TIMESTAMP)
+        end <- max(wx$TIMESTAMP)
+        # want to generate all missing hours and then interpolate from nearby readings
+        h <- c(start)
+        cur <- start + hours(1)
+        while (cur <= end)
+        {
+            h <- c(h, cur)
+            cur <- cur + hours(1)
+        }
+        h <- as.data.table(h)
+        colnames(h) <- c('TIMESTAMP')
+        wx <- merge(h, wx, by=c('TIMESTAMP'), all=TRUE)
+        # should have all the times we need but need to replace NA values in their data
+        # fill missing PREC values with 0 so we don't add rain
+        wx$PREC <- nafill(wx$PREC, fill=0)
+        # just carry observations forward for now
+        for (col in colnames(wx))
+        {
+            if (typeof(wx[[col]]) != 'double' && typeof(wx[[col]]) != 'integer')
+            {
+                const <- na.omit(unique(wx[[col]]))[1]
+                wx[[col]] <- rep(const)
+            }
+            else
+            {
+                wx[[col]] <- nafill(wx[[col]], type='locf')
+            }
+        }
+        wx[, DATE := as.character(as.Date(TIMESTAMP))]
+        wx[, YR := year(TIMESTAMP)]
+        wx[, MON := month(TIMESTAMP)]
+        wx[, DAY := day(TIMESTAMP)]
+        wx[, HR := hour(TIMESTAMP)]
+        wx[, MINUTE := minute(TIMESTAMP)]
+    }
+    # fix stations that just don't have values for things
+    if (typeof(wx$TEMP) == 'logical') {
+        wx <- wx[, -c('TEMP')]
+        wx[, TEMP := 21.1]
+    }
+    if (typeof(wx$RH) == 'logical') {
+        wx <- wx[, -c('RH')]
+        wx[, RH := 45]
+    }
+    if (typeof(wx$WS) == 'logical') {
+        wx <- wx[, -c('WS')]
+        wx[, WS := 13]
+    }
+    if (typeof(wx$PREC) == 'logical') {
+        wx <- wx[, -c('PREC')]
+        wx[, PREC := 0]
+    }
+    wx$TEMP <- nafill(wx$TEMP, fill=21.1)
+    wx$RH <- nafill(wx$RH, fill=45)
+    wx$WS <- nafill(wx$WS, fill=13)
+    wx$PREC <- nafill(wx$PREC, fill=0)
+    return(wx)
+}
+
 renderPlots <- function(input, output)
 {
     stn <- input$station
@@ -60,67 +125,7 @@ renderPlots <- function(input, output)
     df$LAT <- df$LATITUDE
     df$LONG <- df$LONGITUDE
     weatherstream <- as.data.table(df)
-    
-    if (!isSequentialHours(weatherstream))
-    {
-        # need to fix weather
-        start <- min(weatherstream$TIMESTAMP)
-        end <- max(weatherstream$TIMESTAMP)
-        # want to generate all missing hours and then interpolate from nearby readings
-        h <- c(start)
-        cur <- start + hours(1)
-        while (cur <= end)
-        {
-            h <- c(h, cur)
-            cur <- cur + hours(1)
-        }
-        h <- as.data.table(h)
-        colnames(h) <- c('TIMESTAMP')
-        weatherstream <- merge(h, weatherstream, by=c('TIMESTAMP'), all=TRUE)
-        # should have all the times we need but need to replace NA values in their data
-        # fill missing PREC values with 0 so we don't add rain
-        weatherstream$PREC <- nafill(weatherstream$PREC, fill=0)
-        # just carry observations forward for now
-        for (col in colnames(weatherstream))
-        {
-            if (typeof(weatherstream[[col]]) != 'double' && typeof(weatherstream[[col]]) != 'integer')
-            {
-                const <- na.omit(unique(weatherstream[[col]]))[1]
-                weatherstream[[col]] <- rep(const)
-            }
-            else
-            {
-                weatherstream[[col]] <- nafill(weatherstream[[col]], type='locf')
-            }
-        }
-        weatherstream[, DATE := as.character(as.Date(TIMESTAMP))]
-        weatherstream[, YR := year(TIMESTAMP)]
-        weatherstream[, MON := month(TIMESTAMP)]
-        weatherstream[, DAY := day(TIMESTAMP)]
-        weatherstream[, HR := hour(TIMESTAMP)]
-        weatherstream[, MINUTE := minute(TIMESTAMP)]
-    }
-    # fix stations that just don't have values for things
-    if (typeof(weatherstream$TEMP) == 'logical') {
-        weatherstream <- weatherstream[, -c('TEMP')]
-        weatherstream[, TEMP := 21.1]
-    }
-    if (typeof(weatherstream$RH) == 'logical') {
-        weatherstream <- weatherstream[, -c('RH')]
-        weatherstream[, RH := 45]
-    }
-    if (typeof(weatherstream$WS) == 'logical') {
-        weatherstream <- weatherstream[, -c('WS')]
-        weatherstream[, WS := 13]
-    }
-    if (typeof(weatherstream$PREC) == 'logical') {
-        weatherstream <- weatherstream[, -c('PREC')]
-        weatherstream[, PREC := 0]
-    }
-    weatherstream$TEMP <- nafill(weatherstream$TEMP, fill=21.1)
-    weatherstream$RH <- nafill(weatherstream$RH, fill=45)
-    weatherstream$WS <- nafill(weatherstream$WS, fill=13)
-    weatherstream$PREC <- nafill(weatherstream$PREC, fill=0)
+    weatherstream <- cleanWeather(weatherstream)
     
     x <- hFWI(weatherstream)
     daily <- fwi(toDaily(weatherstream))
