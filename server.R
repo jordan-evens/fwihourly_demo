@@ -126,11 +126,44 @@ getHourly <- function(stn)
     return(as.data.table(df))
 }
 
+getForecasts <- function()
+{
+    base_url <- 'http://www.affes.mnr.gov.on.ca/extranet/bulletin_boards/WXProducts/CFS/'
+    files <- c('DFOSS_Day1_NWR.txt', 'DFOSS_Day1_NER.txt',
+               'DFOSS_Day2_NWR.txt', 'DFOSS_Day2_NER.txt', 
+               'DFOSS_Day3.18z.txt', 'DFOSS_Day4.18z.txt', 'DFOSS_Day5.18z.txt')
+    data <- NULL
+    for (f in files)
+    {
+        url <- sprintf('%s%s', base_url, f)
+        print(url)
+        data <- rbind(data, read.csv(url, header=FALSE))
+    }
+    colnames(data) <- c('ID', 'PREC_INTERVAL', 'DATE', 'HR', 'UNK1', 'CREATED', 'UNK2', 'TEMP', 'RH', 'WD', 'WS', 'PREC')
+    data <- data.table(data)
+    data <- data[!is.na(CREATED)]
+    # FIX: warning about wrapping with as.POSIXct
+    data[, DATE := strptime(DATE, format='%Y%m%d')]
+    data[, YR := year(DATE)]
+    data[, MON := month(DATE)]
+    data[, DAY := day(DATE)]
+    data$HR <- 12
+    data$MINUTE <- 0
+    data[, TIMESTAMP := as_datetime(sprintf('%04d-%02d-%02d %02d:%02d:00', YR, MON, DAY, HR, MINUTE))]
+}
+
+getForecast <- function(stn)
+{
+    forecasts <- getForecasts()
+    return(forecasts[ID == stn])
+}
+
 renderPlots <- function(input, output)
 {
     stn <- input$station
     #print(stn)
     hourly <- getHourly(stn)
+    forecast <- getForecast(stn)
     weatherstream <- cleanWeather(hourly)
     
     x <- hFWI(weatherstream)
