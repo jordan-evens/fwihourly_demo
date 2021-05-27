@@ -22,6 +22,11 @@ library(suncalc)
 library(lutz)
 
 source('fwiHourly/hFWI.r')
+HOME_DIR <- 'C:/cfs/diurnal/'
+source('/cfs/diurnal/diurnal.R')
+
+HOURLY_DATA <- list()
+CALCULATED <- list()
 
 cleanWeather <- function(wx)
 {
@@ -90,7 +95,6 @@ cleanWeather <- function(wx)
 
 getHourly <- function(stn)
 {
-    
     urlStn <- sprintf("https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/14/query?where=WEATHER_STATION_CODE%%3D'%s'&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=true&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson", stn)
     #print(urlStn)
     json_cur <- jsonlite::fromJSON(urlStn, flatten=TRUE)
@@ -112,6 +116,7 @@ getHourly <- function(stn)
     }
     # change to standard time if it's daylight time
     zone <- str_replace(zone, 'DT$', 'ST')
+    df$TIMEZONE <- zone
     df$TIMESTAMP <- lubridate::with_tz(df$TIMESTAMP, zone)
     df$HR <- hour(df$TIMESTAMP)
     df$MINUTE <- minute(df$TIMESTAMP)
@@ -126,7 +131,7 @@ getHourly <- function(stn)
     return(as.data.table(df))
 }
 
-getForecasts <- function()
+getAFFESForecasts <- function()
 {
     base_url <- 'http://www.affes.mnr.gov.on.ca/extranet/bulletin_boards/WXProducts/CFS/'
     files <- c('DFOSS_Day1_NWR.txt', 'DFOSS_Day1_NER.txt',
@@ -152,30 +157,127 @@ getForecasts <- function()
     data[, TIMESTAMP := as_datetime(sprintf('%04d-%02d-%02d %02d:%02d:00', YR, MON, DAY, HR, MINUTE))]
 }
 
-getForecast <- function(stn)
+getAFFESForecast <- function(stn)
 {
-    forecasts <- getForecasts()
-    return(forecasts[ID == stn])
+    if (!exists("affes"))
+    {
+        print('Getting AFFES forecast')
+        affes <<- getAFFESForecasts()
+    }
+    return(affes[ID == stn])
+}
+
+findQ <- function(TEMP, RH)
+{
+    # find absolute humidity
+    svp <- 6.108 * exp(17.27 * TEMP / (TEMP + 237.3))
+    vp <- svp * RH / 100.0
+    return(217 * vp / (273.17 + TEMP))
+}
+
+findRH <- function(q, TEMP)
+{
+    cur_vp <- (273.17 + TEMP) * q / 217
+    return(100 * cur_vp / (6.108 * exp(17.27 * TEMP / (TEMP + 237.3))))
+}
+
+findRHFixed <- function(q, TEMP)
+{
+    return(pmin(100, pmax(0, findRH(q, TEMP))))
+}
+
+toMinMax <- function(forecast)
+{
+    minMax <- copy(forecast)
+    minMax[, Q := findQ(TEMP, RH)]
+    minMax[, `:=`(TEMP_MAX = TEMP + 2.1,
+              TEMP_MIN = TEMP - 14.8,
+              WS_MAX = WS * 1.25,
+              WS_MIN = WS * 0.15)]
+    minMax[, `:=`(RH_OPP = 1.0 - RH / 100.0,
+              RH_OPP_MAX = 1.0 - findRHFixed(Q, TEMP_MAX) / 100.0,
+              RH_OPP_MIN = 1.0 - findRHFixed(Q, TEMP_MIN) / 100.0)]
+    return(minMax)
+}
+
+doForecast <- function(minMax)
+{
+    df <- getWx(minMax)
+    row_temp <- list(c_alpha=0.03, c_beta=2.14, c_gamma=-2.97)
+    row_WS <- list(c_alpha=1.21, c_beta=1.50, c_gamma=-2.28)
+    row_RH <- list(c_alpha=0.39, c_beta=2.07, c_gamma=-3.50)
+    intervals <- 1
+    df[, HOUR := HR]
+    df[, APCP := PREC]
+    df[, RH_MAX := 100 * (1.0 - RH_OPP_MIN)]
+    df[, RH_MIN := 100 * (1.0 - RH_OPP_MAX)]
+    df[, RAIN0000 := 0]
+    df[, RAIN0600 := PREC]
+    df[, RAIN1200 := 0]
+    df[, RAIN1800 := 0]
+    pred <- doPrediction(df, row_temp, row_WS, intervals=intervals, row_RH=row_RH)
+    return(pred)
 }
 
 renderPlots <- function(input, output)
 {
+    COLS <- c( 'ID', 'LAT', 'LONG', 'TIMESTAMP', 'TEMP', 'RH', 'WS', 'PREC')
     stn <- input$station
     #print(stn)
-    hourly <- getHourly(stn)
-    forecast <- getForecast(stn)
-    weatherstream <- cleanWeather(hourly)
-    
-    x <- hFWI(weatherstream)
-    daily <- fwi(toDaily(weatherstream))
-    setnames(daily,
-             c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
-             c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
-    daily <- daily[, c('YR', 'MON', 'DAY', 'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
-    x <- merge(x,
-               daily,
-               by=c('YR', 'MON', 'DAY'))
-    
+    if (is.null(CALCULATED[[stn]]))
+    {
+        print(sprintf('Calculating for %s', stn))
+        if (is.null(HOURLY_DATA[[stn]]))
+        {
+            print(sprintf('Getting hourly data for %s', stn))
+            hourly <- getHourly(stn)
+            HOURLY_DATA[[stn]] <<- cleanWeather(hourly)
+        }
+        wx <- HOURLY_DATA[[stn]][, ..COLS]
+        wx[, TYPE := 'OBS']
+        forecast <- getAFFESForecast(stn)
+        if (nrow(forecast) > 0)
+        {
+            minMax <- toMinMax(forecast)
+            minMax[, LAT := hourly$LAT[[1]]]
+            minMax[, LONG := hourly$LONG[[1]]]
+            minMax[, TIMEZONE := hourly$TIMEZONE[[1]]]
+            minMax$HOUR <- minMax$HR
+            minMax$DATE <- as.character(minMax$DATE)
+            fcst <- doForecast(minMax)
+            fcst[, TIMESTAMP := as.character(TIMESTAMP)]
+            fcst[, TIMESTAMP := as.POSIXct(TIMESTAMP, tz=hourly$TIMEZONE[[1]])]
+            f <- fcst[TIMESTAMP > max(wx$TIMESTAMP),]
+            f[, `:=`(LAT = wx$LAT[[1]],
+                     LONG = wx$LONG[[1]])]
+            setnames(f,
+                     c('P_TEMP', 'P_RH', 'P_WS', 'P_PREC'),
+                     c('TEMP', 'RH', 'WS', 'PREC'))
+            f <- f[, ..COLS]
+            f[, TYPE := 'FCST']
+            w <- rbind(wx, f)
+        }
+        else
+        {
+            w <- copy(wx)
+        }
+        w[, `:=`(YR = year(TIMESTAMP),
+                 MON = month(TIMESTAMP),
+                 DAY = day(TIMESTAMP),
+                 HR = hour(TIMESTAMP),
+                 MINUTE = minute(TIMESTAMP))]
+        x <- hFWI(w)
+        daily <- fwi(toDaily(w))
+        setnames(daily,
+                 c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
+                 c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
+        daily <- daily[, c('YR', 'MON', 'DAY', 'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
+        x <- merge(x,
+                   daily,
+                   by=c('YR', 'MON', 'DAY'))
+        CALCULATED[[stn]] <<- x
+    }
+    x <- CALCULATED[[stn]]
     #print(x)
 
     output$tempPlot <- renderPlot({
