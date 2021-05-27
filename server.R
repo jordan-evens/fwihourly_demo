@@ -16,8 +16,6 @@ library(fasttime)
 library(rvest)
 library(ggplot2)
 
-#~ library('devtools')
-#~ devtools::install_github('datastorm-open/suncalc')
 library(suncalc)
 library(lutz)
 
@@ -106,15 +104,20 @@ getHourly <- function(stn)
     df$ID <- df$WEATHER_STATION_CODE
     df$TIMESTAMP <- df$OBSERVATION_DATE
     # find proper time zone
-    tz <- tz_lookup_coords(df$LAT[[1]], df$LONG[[1]], method='accurate')
+    lat <- df$LAT[[1]]
+    long <- df$LONG[[1]]
+    tz <- tz_lookup_coords(lat, long, method='accurate')
+    print(sprintf('getHourly(): %f, %f => %s', lat, long, tz))
     # make sure we stick with standard time and not daylight time
     start <- lubridate::with_tz(df$TIMESTAMP[[1]], tz)
-    zone <- strftime(start, format='%Z')
+    print(start)
+    zone <- strftime(start, tz=tz, format='%Z')
     if (nchar(zone) != 3) {
         stop(sprintf('Expected three letter acronym for time zone but got %s', zone))
     }
     # change to standard time if it's daylight time
     zone <- str_replace(zone, 'DT$', 'ST')
+    print(sprintf('%s => %s', tz, zone))
     df$TIMEZONE <- zone
     df$TIMESTAMP <- lubridate::with_tz(df$TIMESTAMP, zone)
     df$HR <- hour(df$TIMESTAMP)
@@ -232,15 +235,20 @@ renderPlots <- function(input, output)
             hourly <- getHourly(stn)
             HOURLY_DATA[[stn]] <<- cleanWeather(hourly)
         }
-        wx <- HOURLY_DATA[[stn]][, ..COLS]
+        hourly <- HOURLY_DATA[[stn]]
+        wx <- hourly[, ..COLS]
         wx[, TYPE := 'OBS']
+        lat <- hourly$LAT[[1]]
+        long <- hourly$LONG[[1]]
+        tz <- hourly$TIMEZONE[[1]]
+        print(sprintf("%f, %f => %s", lat, long, tz))
         forecast <- getAFFESForecast(stn)
         if (nrow(forecast) > 0)
         {
             minMax <- toMinMax(forecast)
-            minMax[, LAT := hourly$LAT[[1]]]
-            minMax[, LONG := hourly$LONG[[1]]]
-            minMax[, TIMEZONE := hourly$TIMEZONE[[1]]]
+            minMax[, LAT := lat]
+            minMax[, LONG := long]
+            minMax[, TIMEZONE := tz]
             minMax$HOUR <- minMax$HR
             minMax$DATE <- as.character(minMax$DATE)
             fcst <- doForecast(minMax)
