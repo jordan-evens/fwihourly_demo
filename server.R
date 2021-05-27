@@ -281,63 +281,40 @@ renderPlots <- function(input, output)
     max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
     last_day <- c(as.POSIXct(as.Date(max_reading) - days(1)), as.POSIXct(as.Date(max(x$TIMESTAMP))))
     #print(x)
+    
+    plotIndex <- function(index, colour)
+    {
+        return(renderPlot({
+            ggplot(x, aes(x=TIMESTAMP)) +
+                geom_line(aes(y=get(index), linetype=TYPE), colour=colour) +
+                scale_linetype_manual(breaks=c("OBS","FCST"), values=c(1,5)) +
+                coord_cartesian(xlim=last_day) +
+                ylab(index)
+        }))
+    }
+    
+    plotDaily <- function(index)
+    {
+        renderPlot({
+            ggplot(x, aes(x=TIMESTAMP)) +
+                geom_line(aes(y=get(index), linetype=TYPE), color='red') +
+                geom_line(aes(y=get(sprintf('D%s', index)), linetype=TYPE), color='black') +
+                scale_linetype_manual(breaks=c("OBS","FCST"), values=c(1,5)) +
+                coord_cartesian(xlim=last_day) +
+                ylab(index)
+        })
+    }
 
-    output$tempPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=TEMP), color='red') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$rhPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=RH), color='blue') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$wsPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=WS), color='green') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$precPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=PREC), color='blue') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$ffmcPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=FFMC), color='red') +
-            geom_line(aes(y=DFFMC), color='black') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$dmcPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=DMC), color='red') +
-            geom_line(aes(y=DDMC), color='black') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$dcPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=DC), color='red') +
-            geom_line(aes(y=DDC), color='black') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$isiPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=ISI), color='red')+
-            geom_line(aes(y=DISI), color='black') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$buiPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=BUI), color='red')+
-            geom_line(aes(y=DBUI), color='black') +
-            coord_cartesian(xlim=last_day)
-    })
-    output$fwiPlot <- renderPlot({
-        ggplot(x, aes(x=TIMESTAMP)) +
-            geom_line(aes(y=FWI), color='red')+
-            geom_line(aes(y=DFWI), color='black') +
-            coord_cartesian(xlim=last_day)
-    })
+    output$tempPlot <- plotIndex('TEMP', 'red')
+    output$rhPlot <- plotIndex('RH', 'blue')
+    output$wsPlot <- plotIndex('WS', 'green')
+    output$precPlot <- plotIndex('PREC', 'blue')
+    output$ffmcPlot <- plotDaily('FFMC')
+    output$dmcPlot <- plotDaily('DMC')
+    output$dcPlot <- plotDaily('DC')
+    output$isiPlot <- plotDaily('ISI')
+    output$buiPlot <- plotDaily('BUI')
+    output$fwiPlot <- plotDaily('FWI')
 }
 # Define server logic required to draw a histogram
 shinyServer(function(input, output) {
