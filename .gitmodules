@@ -1,3 +1,6 @@
 [submodule "fwiHourly"]
 	path = fwiHourly
 	url = git@github.com:nrcan-cfs-fire/fwiHourly.git
+[submodule "diurnal"]
+	path = diurnal
+	url = git@github.com:jordan-evens/diurnal.git

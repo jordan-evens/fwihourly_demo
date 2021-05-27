@@ -22,8 +22,7 @@ library(suncalc)
 library(lutz)
 
 source('fwiHourly/hFWI.r')
-HOME_DIR <- 'C:/cfs/diurnal/'
-source('/cfs/diurnal/diurnal.R')
+source('diurnal/diurnal.R')
 
 HOURLY_DATA <- list()
 CALCULATED <- list()
