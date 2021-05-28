@@ -29,6 +29,7 @@ shinyUI(fluidPage(
     # Application title
     titlePanel("Hourly Data"),
     selectInput("station", "Station", stns),
+    dateInput("since", "Since"),
     plotOutput("tempPlot"),
     plotOutput("rhPlot"),
     plotOutput("wsPlot"),

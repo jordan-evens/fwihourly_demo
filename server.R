@@ -221,7 +221,7 @@ doForecast <- function(minMax)
     return(pred)
 }
 
-renderPlots <- function(input, output)
+renderPlots <- function(input, output, session)
 {
     COLS <- c( 'ID', 'LAT', 'LONG', 'TIMESTAMP', 'TEMP', 'RH', 'WS', 'PREC')
     stn <- input$station
@@ -286,7 +286,12 @@ renderPlots <- function(input, output)
     }
     x <- CALCULATED[[stn]]
     max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
-    last_day <- c(as.POSIXct(as.Date(max_reading) - days(1)), as.POSIXct(as.Date(max(x$TIMESTAMP))))
+    since <- as.POSIXct(as.Date(max_reading) - days(1))
+    if (is.null(input$since) || since < as.POSIXct(input$since))
+    {
+        updateDateInput(session, "since", value=(since))
+    }
+    last_day <- c(as.POSIXct(input$since), as.POSIXct(as.Date(max(x$TIMESTAMP))))
     #print(x)
     
     plotIndex <- function(index, colour)
@@ -324,6 +329,7 @@ renderPlots <- function(input, output)
     output$fwiPlot <- plotDaily('FWI')
 }
 # Define server logic required to draw a histogram
-shinyServer(function(input, output) {
-    observeEvent(input$station, renderPlots(input, output))
+shinyServer(function(input, output, session) {
+    observeEvent(input$station, renderPlots(input, output, session))
+    observeEvent(input$since, renderPlots(input, output, session))
 })
