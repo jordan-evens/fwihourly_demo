@@ -24,6 +24,7 @@ source('diurnal/diurnal.R')
 
 HOURLY_DATA <- list()
 CALCULATED <- list()
+OLD_STN <- ''
 
 cleanWeather <- function(wx)
 {
@@ -284,14 +285,18 @@ renderPlots <- function(input, output, session)
                    by=c('YR', 'MON', 'DAY'))
         CALCULATED[[stn]] <<- x
     }
+    hourly <- HOURLY_DATA[[stn]]
     x <- CALCULATED[[stn]]
     max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
-    since <- as.POSIXct(as.Date(max_reading) - days(1))
-    if (is.null(input$since) || since < as.POSIXct(input$since))
+    tz <- hourly$TIMEZONE[[1]]
+    # HACK: convert to character to get tz to work
+    since <- as.POSIXct(as.character(as.Date(max_reading) - days(1)), tz=tz)
+    if (OLD_STN != stn || is.null(input$since) || since < as.POSIXct(input$since))
     {
-        updateDateInput(session, "since", value=(since))
+        updateDateInput(session, "since", value=(since), max=(as.Date(max_reading) - days(1)))
     }
-    last_day <- c(as.POSIXct(input$since), as.POSIXct(as.Date(max(x$TIMESTAMP))))
+    OLD_STN <<- stn
+    last_day <- c(as.POSIXct(as.character(input$since), tz=tz), as.POSIXct(as.Date(max(x$TIMESTAMP))))
     #print(x)
     
     plotIndex <- function(index, colour)
