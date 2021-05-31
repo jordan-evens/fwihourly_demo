@@ -288,12 +288,13 @@ renderPlots <- function(input, output, session)
     hourly <- HOURLY_DATA[[stn]]
     x <- CALCULATED[[stn]]
     max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
+    min_reading <- min(HOURLY_DATA[[stn]]$TIMESTAMP)
     tz <- hourly$TIMEZONE[[1]]
     # HACK: convert to character to get tz to work
     since <- as.POSIXct(as.character(as.Date(max_reading) - days(1)), tz=tz)
     if (OLD_STN != stn || is.null(input$since) || since < as.POSIXct(input$since))
     {
-        updateDateInput(session, "since", value=(since), max=(as.Date(max_reading) - days(1)))
+        updateDateInput(session, "since", value=(since), max=(as.Date(max_reading) - days(1)), min=(min_reading))
     }
     OLD_STN <<- stn
     last_day <- c(as.POSIXct(as.character(input$since), tz=tz), as.POSIXct(as.Date(max(x$TIMESTAMP))))
