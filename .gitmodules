@@ -1,0 +1,3 @@
+[submodule "fwiHourly"]
+	path = fwiHourly
+	url = git@github.com:nrcan-cfs-fire/fwiHourly.git
