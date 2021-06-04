@@ -91,6 +91,18 @@ cleanWeather <- function(wx)
     return(wx)
 }
 
+fixTimezone <- function(zone)
+{
+    if (nchar(zone) != 3) {
+        stop(sprintf('Expected three letter acronym for time zone but got %s', zone))
+    }
+    # change to standard time if it's daylight time
+    zone <- str_replace(zone, 'DT$', 'ST')
+    # HACK: fix missing CST zone
+    zone <- str_replace(zone, '^CST$', 'Etc/GMT+6')
+    return(zone)
+}
+
 getHourly <- function(stn)
 {
     urlStn <- sprintf("https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/14/query?where=WEATHER_STATION_CODE%%3D'%s'&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=true&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson", stn)
@@ -112,12 +124,7 @@ getHourly <- function(stn)
     # make sure we stick with standard time and not daylight time
     start <- lubridate::with_tz(df$TIMESTAMP[[1]], tz)
     print(start)
-    zone <- strftime(start, tz=tz, format='%Z')
-    if (nchar(zone) != 3) {
-        stop(sprintf('Expected three letter acronym for time zone but got %s', zone))
-    }
-    # change to standard time if it's daylight time
-    zone <- str_replace(zone, 'DT$', 'ST')
+    zone <- fixTimezone(strftime(start, tz=tz, format='%Z'))
     print(sprintf('%s => %s', tz, zone))
     df$TIMEZONE <- zone
     df$TIMESTAMP <- lubridate::with_tz(df$TIMESTAMP, zone)
