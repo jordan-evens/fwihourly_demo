@@ -287,9 +287,11 @@ renderPlots <- function(input, output, session)
                  c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
                  c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
         daily <- daily[, c('YR', 'MON', 'DAY', 'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
+        daily[, HR := 17]
         x <- merge(x,
                    daily,
-                   by=c('YR', 'MON', 'DAY'))
+                   by=c('YR', 'MON', 'DAY', 'HR'),
+                   all.x=TRUE)
         CALCULATED[[stn]] <<- x
     }
     hourly <- HOURLY_DATA[[stn]]
@@ -310,9 +312,9 @@ renderPlots <- function(input, output, session)
     plotIndex <- function(index, colour)
     {
         return(renderPlot({
-            ggplot(x, aes(x=TIMESTAMP)) +
-                geom_line(aes(y=get(index), linetype=TYPE), colour=colour) +
-                scale_linetype_manual(breaks=c("OBS","FCST"), values=c(1,5)) +
+            ggplot(NULL, aes(x=TIMESTAMP)) +
+                geom_point(data=x[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour=colour) +
+                geom_line(data=x[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour=colour) +
                 coord_cartesian(xlim=last_day) +
                 ylab(index)
         }))
@@ -321,10 +323,11 @@ renderPlots <- function(input, output, session)
     plotDaily <- function(index)
     {
         renderPlot({
-            ggplot(x, aes(x=TIMESTAMP)) +
-                geom_line(aes(y=get(index), linetype=TYPE), color='red') +
-                geom_line(aes(y=get(sprintf('D%s', index)), linetype=TYPE), color='black') +
-                scale_linetype_manual(breaks=c("OBS","FCST"), values=c(1,5)) +
+            ggplot(NULL, aes(x=TIMESTAMP)) +
+                geom_point(data=x[TYPE == 'OBS'], shape=16, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
+                geom_point(data=x[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour='red') +
+                geom_point(data=x[TYPE == 'FCST'], shape=1, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
+                geom_line(data=x[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour='red') +
                 coord_cartesian(xlim=last_day) +
                 ylab(index)
         })
