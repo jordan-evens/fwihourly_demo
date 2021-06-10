@@ -22,7 +22,7 @@ urlIds <- "https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/O
 json_stns <- jsonlite::fromJSON(urlIds)
 
 stns <- sort(json_stns$features[[1]][[1]])
-
+stns <- stns[grepl("^[A-Z]*$", stns)]
 # Define UI for application that draws a histogram
 shinyUI(fluidPage(
 
