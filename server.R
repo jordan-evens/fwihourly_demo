@@ -24,6 +24,8 @@ source('diurnal/diurnal.R')
 
 HOURLY_DATA <- list()
 CALCULATED <- list()
+ORIG_FORECAST <- list()
+FORECAST <- list()
 OLD_STN <- ''
 
 cleanWeather <- function(wx)
@@ -262,20 +264,36 @@ renderPlots <- function(input, output, session)
             fcst <- doForecast(minMax)
             fcst[, TIMESTAMP := as.character(TIMESTAMP)]
             fcst[, TIMESTAMP := as.POSIXct(TIMESTAMP, tz=hourly$TIMEZONE[[1]])]
-            f <- fcst[TIMESTAMP > max(wx$TIMESTAMP),]
-            f[, `:=`(LAT = wx$LAT[[1]],
+            #fcst <- fcst[TIMESTAMP > max(as.Date(wx$TIMESTAMP, tz=tz)),]
+            fcst[, `:=`(LAT = wx$LAT[[1]],
                      LONG = wx$LONG[[1]])]
-            setnames(f,
+            setnames(fcst,
                      c('P_TEMP', 'P_RH', 'P_WS', 'P_PREC'),
                      c('TEMP', 'RH', 'WS', 'PREC'))
-            f <- f[, ..COLS]
-            f[, TYPE := 'FCST']
-            w <- rbind(wx, f)
+            fcst <- fcst[, ..COLS]
+            fcst[, TYPE := 'FCST']
+            FORECAST[[stn]] <<- fcst
         }
-        else
-        {
-            w <- copy(wx)
-        }
+        f <- FORECAST[[stn]]
+        w <- rbind(wx[TIMESTAMP < min(f$TIMESTAMP)], f)
+        w[, `:=`(YR = year(TIMESTAMP),
+                 MON = month(TIMESTAMP),
+                 DAY = day(TIMESTAMP),
+                 HR = hour(TIMESTAMP),
+                 MINUTE = minute(TIMESTAMP))]
+        x <- hFWI(w)
+        daily <- fwi(toDaily(w))
+        setnames(daily,
+                 c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
+                 c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
+        daily <- daily[, c('YR', 'MON', 'DAY', 'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
+        daily[, HR := 17]
+        x <- merge(x,
+                   daily,
+                   by=c('YR', 'MON', 'DAY', 'HR'),
+                   all.x=TRUE)
+        ORIG_FORECAST[[stn]] <<- x
+        w <- rbind(wx, f[TIMESTAMP > max(wx$TIMESTAMP)])
         w[, `:=`(YR = year(TIMESTAMP),
                  MON = month(TIMESTAMP),
                  DAY = day(TIMESTAMP),
@@ -295,7 +313,8 @@ renderPlots <- function(input, output, session)
         CALCULATED[[stn]] <<- x
     }
     hourly <- HOURLY_DATA[[stn]]
-    x <- CALCULATED[[stn]]
+    forecasted <- ORIG_FORECAST[[stn]]
+    actual <- CALCULATED[[stn]]
     max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
     min_reading <- min(HOURLY_DATA[[stn]]$TIMESTAMP)
     tz <- hourly$TIMEZONE[[1]]
@@ -306,15 +325,16 @@ renderPlots <- function(input, output, session)
         updateDateInput(session, "since", value=(since), max=(as.Date(max_reading) - days(1)), min=(min_reading))
     }
     OLD_STN <<- stn
-    last_day <- c(as.POSIXct(as.character(input$since), tz=tz), as.POSIXct(as.Date(max(x$TIMESTAMP))))
+    last_day <- c(as.POSIXct(as.character(input$since), tz=tz), as.POSIXct(as.Date(max(actual$TIMESTAMP))))
     #print(x)
     
     plotIndex <- function(index, colour)
     {
         return(renderPlot({
             ggplot(NULL, aes(x=TIMESTAMP)) +
-                geom_point(data=x[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour=colour) +
-                geom_line(data=x[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour=colour) +
+                geom_point(data=actual[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour=colour) +
+                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour=colour) +
+                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), linetype=3, colour=colour) +
                 coord_cartesian(xlim=last_day) +
                 ylab(index)
         }))
@@ -324,10 +344,12 @@ renderPlots <- function(input, output, session)
     {
         renderPlot({
             ggplot(NULL, aes(x=TIMESTAMP)) +
-                geom_point(data=x[TYPE == 'OBS'], shape=16, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
-                geom_point(data=x[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour='red') +
-                geom_point(data=x[TYPE == 'FCST'], shape=1, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
-                geom_line(data=x[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour='red') +
+                geom_point(data=actual[TYPE == 'OBS'], shape=16, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
+                geom_point(data=actual[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour='red') +
+                geom_point(data=actual[TYPE == 'FCST'], shape=1, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
+                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour='red') +
+                geom_point(data=forecasted[TYPE == 'FCST'], shape=8, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
+                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), linetype=3, colour='red') +
                 coord_cartesian(xlim=last_day) +
                 ylab(index)
         })
