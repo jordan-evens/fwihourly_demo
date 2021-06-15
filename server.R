@@ -150,13 +150,19 @@ getAFFESForecasts <- function()
                'DFOSS_Day2_NWR.txt', 'DFOSS_Day2_NER.txt', 
                'DFOSS_Day3.18z.txt', 'DFOSS_Day4.18z.txt', 'DFOSS_Day5.18z.txt')
     data <- NULL
+    last_created <- NULL
     for (f in files)
     {
         url <- sprintf('%s%s', base_url, f)
         print(url)
-        data <- rbind(data, read.csv(url, header=FALSE))
+        this_file <- read.csv(url, header=FALSE)
+        colnames(this_file) <- c('ID', 'PREC_INTERVAL', 'DATE', 'HR', 'UNK1', 'CREATED', 'UNK2', 'TEMP', 'RH', 'WD', 'WS', 'PREC')
+        if (is.null(last_created) || unique(this_file$CREATED)[[1]] == last_created)
+        {
+            data <- rbind(data, this_file)
+            last_created <- unique(this_file$CREATED)[[1]]
+        }
     }
-    colnames(data) <- c('ID', 'PREC_INTERVAL', 'DATE', 'HR', 'UNK1', 'CREATED', 'UNK2', 'TEMP', 'RH', 'WD', 'WS', 'PREC')
     data <- data.table(data)
     data <- data[!is.na(CREATED)]
     # FIX: warning about wrapping with as.POSIXct
