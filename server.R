@@ -175,6 +175,7 @@ getAFFESForecasts <- function()
     data$HR <- 12
     data$MINUTE <- 0
     data[, TIMESTAMP := as_datetime(sprintf('%04d-%02d-%02d %02d:%02d:00', YR, MON, DAY, HR, MINUTE))]
+    return(data)
 }
 
 getAFFESForecast <- function(stn)
@@ -223,6 +224,7 @@ toMinMax <- function(forecast)
 doForecast <- function(minMax)
 {
     df <- getWx(minMax)
+    print('Got weather')
     row_temp <- list(c_alpha=0.03, c_beta=2.14, c_gamma=-2.97)
     row_WS <- list(c_alpha=1.21, c_beta=1.50, c_gamma=-2.28)
     row_RH <- list(c_alpha=0.39, c_beta=2.07, c_gamma=-3.50)
@@ -235,6 +237,7 @@ doForecast <- function(minMax)
     df[, RAIN0600 := PREC]
     df[, RAIN1200 := 0]
     df[, RAIN1800 := 0]
+    print('Doing prediction')
     pred <- doPrediction(df, row_temp, row_WS, intervals=intervals, row_RH=row_RH)
     return(pred)
 }
@@ -261,14 +264,17 @@ renderPlots <- function(input, output, session)
         tz <- hourly$TIMEZONE[[1]]
         print(sprintf("%f, %f => %s", lat, long, tz))
         forecast <- getAFFESForecast(stn)
+        print('Got AFFES forecast')
         if (nrow(forecast) > 0)
         {
+            print('Getting min/max')
             minMax <- toMinMax(forecast)
             minMax[, LAT := lat]
             minMax[, LONG := long]
             minMax[, TIMEZONE := tz]
             minMax$HOUR <- minMax$HR
             minMax$DATE <- as.character(minMax$DATE)
+            print('Got min/max')
             fcst <- doForecast(minMax)
             fcst[, TIMESTAMP := as.character(TIMESTAMP)]
             fcst[, TIMESTAMP := as.POSIXct(TIMESTAMP, tz=hourly$TIMEZONE[[1]])]
@@ -281,8 +287,10 @@ renderPlots <- function(input, output, session)
             fcst <- fcst[, ..COLS]
             fcst[, TYPE := 'FCST']
             FORECAST[[stn]] <<- fcst
+            print('Got hourly forecast')
         }
-        f <- FORECAST[[stn]]
+        f <- copy(FORECAST[[stn]])
+        f <- f[TIMESTAMP >= (lubridate::force_tz(as.Date(min(TIMESTAMP)), tzone=tz) + hours(min(8, hour(wx[, max(TIMESTAMP)])))),]
         w <- rbind(wx[TIMESTAMP < min(f$TIMESTAMP)], f)
         w[, `:=`(YR = year(TIMESTAMP),
                  MON = month(TIMESTAMP),
@@ -301,6 +309,7 @@ renderPlots <- function(input, output, session)
                    by=c('YR', 'MON', 'DAY', 'HR'),
                    all.x=TRUE)
         ORIG_FORECAST[[stn]] <<- x
+        f <- FORECAST[[stn]]
         w <- rbind(wx, f[TIMESTAMP > max(wx$TIMESTAMP)])
         w[, `:=`(YR = year(TIMESTAMP),
                  MON = month(TIMESTAMP),
@@ -339,27 +348,27 @@ renderPlots <- function(input, output, session)
     plotIndex <- function(index, colour)
     {
         return(renderPlot({
-            ggplot(NULL, aes(x=TIMESTAMP)) +
-                geom_point(data=actual[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour=colour) +
-                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour=colour) +
-                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), linetype=3, colour=colour) +
+            ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
+                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour=colour, shape=16) +
+                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=5) +
+                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=3) +
                 coord_cartesian(xlim=last_day) +
-                ylab(index)
+                labs(x='TIMESTAMP', y=index, title=index)
         }))
     }
     
     plotDaily <- function(index)
     {
         renderPlot({
-            ggplot(NULL, aes(x=TIMESTAMP)) +
-                geom_point(data=actual[TYPE == 'OBS'], shape=16, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
-                geom_point(data=actual[TYPE == 'OBS'], shape=16, aes(y=get(index)), colour='red') +
-                geom_point(data=actual[TYPE == 'FCST'], shape=1, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
-                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), linetype=5, colour='red') +
-                geom_point(data=forecasted[TYPE == 'FCST'], shape=8, aes(y=get(sprintf('D%s', index))), colour='black', na.rm=TRUE) +
-                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), linetype=3, colour='red') +
+            ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
+                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(sprintf('D%s', index))), colour='black', shape=16, na.rm=TRUE) +
+                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour='red', shape=16) +
+                geom_point(data=actual[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=1, na.rm=TRUE) +
+                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=5) +
+                geom_point(data=forecasted[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=8, na.rm=TRUE) +
+                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=3) +
                 coord_cartesian(xlim=last_day) +
-                ylab(index)
+                labs(x='TIMESTAMP', y=index, title=index)
         })
     }
 
