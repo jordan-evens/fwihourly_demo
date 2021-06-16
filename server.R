@@ -345,13 +345,15 @@ renderPlots <- function(input, output, session)
     last_day <- c(as.POSIXct(as.character(input$since), tz=tz), as.POSIXct(as.Date(max(actual$TIMESTAMP))))
     #print(x)
     
+    SIZE <- list(line=0.75, point=2, daily=3)
+    
     plotIndex <- function(index, colour)
     {
         return(renderPlot({
             ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
-                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour=colour, shape=16) +
-                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=5) +
-                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=3) +
+                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour=colour, shape=16, size=SIZE$point) +
+                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=5, size=SIZE$line) +
+                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=3, size=SIZE$line) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
         }))
@@ -361,12 +363,12 @@ renderPlots <- function(input, output, session)
     {
         renderPlot({
             ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
-                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(sprintf('D%s', index))), colour='black', shape=16, na.rm=TRUE) +
-                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour='red', shape=16) +
-                geom_point(data=actual[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=1, na.rm=TRUE) +
-                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=5) +
-                geom_point(data=forecasted[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=8, na.rm=TRUE) +
-                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=3) +
+                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(sprintf('D%s', index))), colour='black', shape=16, size=SIZE$daily, na.rm=TRUE) +
+                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour='red', shape=16, size=SIZE$daily) +
+                geom_point(data=actual[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=1, size=SIZE$daily, na.rm=TRUE) +
+                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=5, size=SIZE$line) +
+                geom_point(data=forecasted[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=8, size=SIZE$daily, na.rm=TRUE) +
+                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=3, size=SIZE$line) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
         })
