@@ -18,6 +18,7 @@ library(ggplot2)
 
 library(suncalc)
 library(lutz)
+library(stringr)
 
 source('fwiHourly/hFWI.r')
 source('diurnal/diurnal.R')
