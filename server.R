@@ -158,10 +158,11 @@ getAFFESForecasts <- function()
         print(url)
         this_file <- read.csv(url, header=FALSE)
         colnames(this_file) <- c('ID', 'PREC_INTERVAL', 'DATE', 'HR', 'UNK1', 'CREATED', 'UNK2', 'TEMP', 'RH', 'WD', 'WS', 'PREC')
-        if (is.null(last_created) || unique(this_file$CREATED)[[1]] >= last_created)
+        now <- unique(this_file$CREATED)[[1]]
+        if (is.null(last_created) || now >= last_created)
         {
             data <- rbind(data, this_file)
-            last_created <- unique(this_file$CREATED)[[1]]
+            last_created <- now
         }
     }
     data <- data.table(data)
