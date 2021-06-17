@@ -15,6 +15,7 @@ library(data.table)
 library(fasttime)
 library(rvest)
 library(ggplot2)
+library(DT)
 
 library(suncalc)
 library(lutz)
@@ -188,6 +189,43 @@ getAFFESForecast <- function(stn)
     return(affes[ID == stn])
 }
 
+getDFOSS <- function(stn)
+{
+    urlStn <- paste0('https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/13/query?where=WEATHER_STATION_CODE+%3D+%27',
+                  stn,
+                  '%27+AND+DFOSS_WEATHER_TYPE%3D%27PM%27&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=false&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson')
+    json_cur <- jsonlite::fromJSON(urlStn, flatten=TRUE)
+    df <- data.frame(json_cur$features)
+    names(df) <- gsub(names(df), pattern='attributes.', replacement='')
+    df$RAINFALL[is.na(df$RAINFALL)] <- 0
+    df$ID <- df$WEATHER_STATION_CODE
+    # find proper time zone
+    lat <- df$LAT[[1]]
+    long <- df$LONG[[1]]
+    tz <- tz_lookup_coords(lat, long, method='accurate')
+    print(sprintf('getDFOSS(): %f, %f => %s', lat, long, tz))
+    # make sure we stick with standard time and not daylight time
+    df$TIMESTAMP <- lubridate::force_tz(lubridate::as_datetime(df$DFOSS_WEATHER_DATE / 1000), tzone=tz)
+    start <- as.POSIXct(df$TIMESTAMP[[1]], tz=tz)
+    print(start)
+    zone <- fixTimezone(strftime(start, tz=tz, format='%Z'))
+    print(sprintf('%s => %s', tz, zone))
+    df$TIMEZONE <- zone
+    df$TIMESTAMP <- lubridate::force_tz(df$TIMESTAMP, zone) + hours(12)
+    df$PREC <- as.double(df$RAINFALL)
+    df$WS <- df$ADJWINDSPEED
+    df$LAT <- df$LATITUDE
+    df$LONG <- df$LONGITUDE
+    df <- df[, c('ID', 'LAT', 'LONG', 'TIMESTAMP', 'TYPE', 'TEMP', 'RH',  'WS', 'PREC', 'FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI')]
+    df$DATE <- as.character(date(df$TIMESTAMP))
+    df$YR <- year(df$TIMESTAMP)
+    df$MON <- month(df$TIMESTAMP)
+    df$DAY <- day(df$TIMESTAMP)
+    df$HR <- hour(df$TIMESTAMP)
+    df$MINUTE <- minute(df$TIMESTAMP)
+    return(as.data.table(df))
+}
+
 findQ <- function(TEMP, RH)
 {
     # find absolute humidity
@@ -289,6 +327,10 @@ renderPlots <- function(input, output, session)
             FORECAST[[stn]] <<- fcst
             print('Got hourly forecast')
         }
+        dfoss <- getDFOSS(stn)
+        startup <- dfoss[1]
+        output$startup <- DT::renderDT(startup,
+                                       options=list(dom='t'))
         f <- copy(FORECAST[[stn]])
         f <- f[TIMESTAMP >= (lubridate::force_tz(as.Date(min(TIMESTAMP)), tzone=tz) + hours(min(8, hour(wx[, max(TIMESTAMP)])))),]
         w <- rbind(wx[TIMESTAMP < min(f$TIMESTAMP)], f)
@@ -297,8 +339,12 @@ renderPlots <- function(input, output, session)
                  DAY = day(TIMESTAMP),
                  HR = hour(TIMESTAMP),
                  MINUTE = minute(TIMESTAMP))]
-        x <- hFWI(w)
-        daily <- fwi(toDaily(w))
+        active <- w[TIMESTAMP > as.Date(startup$TIMESTAMP, tz=tz),]
+        inactive <- w[TIMESTAMP <= (as.Date(startup$TIMESTAMP, tz=tz) + 1),]
+        x <- hFWI(active, ffmc_old=startup$FFMC, dmc_old=startup$DMC, dc_old=startup$DC)
+        x <- rbind(inactive, x, fill=TRUE)
+        daily <- fwi(toDaily(active))
+        daily <- rbind(toDaily(inactive), daily, fill=TRUE)
         setnames(daily,
                  c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
                  c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
@@ -316,8 +362,12 @@ renderPlots <- function(input, output, session)
                  DAY = day(TIMESTAMP),
                  HR = hour(TIMESTAMP),
                  MINUTE = minute(TIMESTAMP))]
-        x <- hFWI(w)
-        daily <- fwi(toDaily(w))
+        active <- w[TIMESTAMP > as.Date(startup$TIMESTAMP, tz=tz),]
+        inactive <- w[TIMESTAMP <= (as.Date(startup$TIMESTAMP, tz=tz) + 1),]
+        x <- hFWI(active, ffmc_old=startup$FFMC, dmc_old=startup$DMC, dc_old=startup$DC)
+        x <- rbind(inactive, x, fill=TRUE)
+        daily <- fwi(toDaily(active))
+        daily <- rbind(toDaily(inactive), daily, fill=TRUE)
         setnames(daily,
                  c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
                  c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))

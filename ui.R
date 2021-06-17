@@ -14,6 +14,7 @@ library(jsonlite)
 library(anytime)
 library(stringr)
 library(rvest)
+library(DT)
 urlServer <- "https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer"
 xml_server <- xml2::read_html(urlServer)
 ref <- str_extract((html_nodes(xml_server, xpath=".//ul[contains(., 'Spatial Reference: ')]") %>% html_text())[1], "Spatial Reference: .*")
@@ -30,6 +31,7 @@ shinyUI(fluidPage(
     titlePanel("Hourly Data"),
     selectInput("station", "Station", stns),
     dateInput("since", "Since"),
+    DT::dataTableOutput("startup"),
     plotOutput("tempPlot"),
     plotOutput("rhPlot"),
     plotOutput("wsPlot"),
