@@ -429,9 +429,10 @@ renderPlots <- function(input, output, session)
     {
         return(renderPlot({
             ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
-                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour=colour, shape=16, size=SIZE$point) +
-                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour=colour, linetype=5, size=SIZE$line) +
-                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour=colour, linetype=3, size=SIZE$line) +
+                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index), shape=factor(TYPE)), colour=colour, size=SIZE$point) +
+                scale_shape_manual(name='Reading Type', values=c('OBS'=16, 'FCST'=8)) +
+                geom_line(data=df[TYPE == 'FCST' & FREQUENCY == 'Hourly'], aes(y=get(index), linetype=factor(STREAM)), colour=colour, size=SIZE$line) +
+                scale_linetype_manual(name='Stream Type', values=c('Revised'='longdash', 'Original'='dotted')) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
         }))
@@ -442,10 +443,10 @@ renderPlots <- function(input, output, session)
         renderPlot({
             ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=16, size=SIZE$daily, na.rm=TRUE) +
-                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', shape=16, size=SIZE$daily) +
+                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', shape=16, size=SIZE$point) +
                 geom_point(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=1, size=SIZE$daily, na.rm=TRUE) +
-                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=5, size=SIZE$line) +
                 geom_point(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=8, size=SIZE$daily, na.rm=TRUE) +
+                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=5, size=SIZE$line) +
                 geom_line(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=3, size=SIZE$line) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
