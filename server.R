@@ -329,55 +329,81 @@ renderPlots <- function(input, output, session)
         }
         dfoss <- getDFOSS(stn)
         startup <- dfoss[1]
+        init <- data.frame(ffmc=as.double(startup$FFMC),
+                     dmc=as.double(startup$DMC),
+                     dc=as.double(startup$DC),
+                     lat=lat[[1]])
         output$startup <- DT::renderDT(startup,
                                        options=list(dom='t'))
         f <- copy(FORECAST[[stn]])
         f <- f[TIMESTAMP >= (lubridate::force_tz(as.Date(min(TIMESTAMP)), tzone=tz) + hours(min(8, hour(wx[, max(TIMESTAMP)])))),]
         w <- rbind(wx[TIMESTAMP < min(f$TIMESTAMP)], f)
-        w[, `:=`(YR = year(TIMESTAMP),
+        w[, `:=`(DATE = as.character(as.Date(TIMESTAMP, tz=tz)),
+                 YR = year(TIMESTAMP),
                  MON = month(TIMESTAMP),
                  DAY = day(TIMESTAMP),
                  HR = hour(TIMESTAMP),
                  MINUTE = minute(TIMESTAMP))]
-        active <- w[TIMESTAMP > as.Date(startup$TIMESTAMP, tz=tz),]
-        inactive <- w[TIMESTAMP <= (as.Date(startup$TIMESTAMP, tz=tz) + 1),]
-        x <- hFWI(active, ffmc_old=startup$FFMC, dmc_old=startup$DMC, dc_old=startup$DC)
+        active <- w[DATE > as.Date(startup$TIMESTAMP, tz=tz),]
+        inactive <- w[DATE <= as.Date(startup$TIMESTAMP, tz=tz),]
+        x <- hFWI(active, ffmc_old=init$ffmc, dmc_old=init$dmc, dc_old=init$dc)
         x <- rbind(inactive, x, fill=TRUE)
-        daily <- fwi(toDaily(active))
-        daily <- rbind(toDaily(inactive), daily, fill=TRUE)
-        setnames(daily,
-                 c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
-                 c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
-        daily <- daily[, c('YR', 'MON', 'DAY', 'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
-        daily[, HR := 17]
-        x <- merge(x,
-                   daily,
-                   by=c('YR', 'MON', 'DAY', 'HR'),
-                   all.x=TRUE)
-        ORIG_FORECAST[[stn]] <<- x
-        f <- FORECAST[[stn]]
+        x$STREAM <- 'Original'
+        x$FREQUENCY <- 'Hourly'
+        df <- x
+        daily_past <- toDaily(active)
+        daily_forecast_orig <- forecast[, c('DATE', 'ID', 'TIMESTAMP', 'TEMP', 'RH', 'WS', 'PREC', 'YR', 'MON', 'DAY', 'HR', 'MINUTE')]
+        daily_forecast_orig$TIMESTAMP <- lubridate::force_tz(daily_forecast_orig$TIMESTAMP, tz)
+        daily_forecast_orig$DATE <- as.character(daily_forecast_orig$DATE)
+        daily_forecast_orig$LAT <- lat[[1]]
+        daily_forecast_orig$LONG <- long[[1]]
+        daily_forecast_orig$TYPE <- 'FCST'
+        daily_orig <- rbind(daily_past[DATE < min(daily_forecast_orig$DATE)], daily_forecast_orig)
+        daily_orig <- fwi(daily_orig, init=init)
+        daily <- rbind(toDaily(inactive), daily_orig, fill=TRUE)
+        daily$STREAM <- 'Original'
+        daily$FREQUENCY <- 'Daily'
+        #setnames(daily,
+        #         c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
+        #         c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
+        #daily <- daily[, c('YR', 'MON', 'DAY', 'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
+        # FIX: put indices at 1700 and weather at 1200
+        #daily[, HR := 17]
+        #x <- merge(x,
+        #           daily,
+        #           by=c('YR', 'MON', 'DAY', 'HR'),
+        #           all.x=TRUE)
+        df <- rbind(df, daily)
+        ORIG_FORECAST[[stn]] <<- df
+        f <- copy(FORECAST[[stn]])
         w <- rbind(wx, f[TIMESTAMP > max(wx$TIMESTAMP)])
-        w[, `:=`(YR = year(TIMESTAMP),
+        w[, `:=`(DATE = as.character(as.Date(TIMESTAMP, tz=tz)),
+                 YR = year(TIMESTAMP),
                  MON = month(TIMESTAMP),
                  DAY = day(TIMESTAMP),
                  HR = hour(TIMESTAMP),
                  MINUTE = minute(TIMESTAMP))]
-        active <- w[TIMESTAMP > as.Date(startup$TIMESTAMP, tz=tz),]
-        inactive <- w[TIMESTAMP <= (as.Date(startup$TIMESTAMP, tz=tz) + 1),]
-        x <- hFWI(active, ffmc_old=startup$FFMC, dmc_old=startup$DMC, dc_old=startup$DC)
+        active <- w[DATE > as.Date(startup$TIMESTAMP, tz=tz),]
+        inactive <- w[DATE <= as.Date(startup$TIMESTAMP, tz=tz),]
+        x <- hFWI(active, ffmc_old=init$ffmc, dmc_old=init$dmc, dc_old=init$dc)
         x <- rbind(inactive, x, fill=TRUE)
-        daily <- fwi(toDaily(active))
-        daily <- rbind(toDaily(inactive), daily, fill=TRUE)
-        setnames(daily,
-                 c('FFMC', 'DMC', 'DC', 'ISI', 'BUI', 'FWI', 'DSR'),
-                 c('DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR'))
-        daily <- daily[, c('YR', 'MON', 'DAY', 'DFFMC', 'DDMC', 'DDC', 'DISI', 'DBUI', 'DFWI', 'DDSR')]
-        daily[, HR := 17]
-        x <- merge(x,
-                   daily,
-                   by=c('YR', 'MON', 'DAY', 'HR'),
-                   all.x=TRUE)
-        CALCULATED[[stn]] <<- x
+        x$STREAM <- 'Revised'
+        x$FREQUENCY <- 'Hourly'
+        df <- x
+        daily_past <- toDaily(active)
+        daily_forecast_orig <- forecast[, c('DATE', 'ID', 'TIMESTAMP', 'TEMP', 'RH', 'WS', 'PREC', 'YR', 'MON', 'DAY', 'HR', 'MINUTE')]
+        daily_forecast_orig$TIMESTAMP <- lubridate::force_tz(daily_forecast_orig$TIMESTAMP, tz)
+        daily_forecast_orig$DATE <- as.character(daily_forecast_orig$DATE)
+        daily_forecast_orig$LAT <- lat[[1]]
+        daily_forecast_orig$LONG <- long[[1]]
+        daily_forecast_orig$TYPE <- 'FCST'
+        daily_orig <- rbind(daily_past, daily_forecast_orig[DATE > max(daily_past$DATE)])
+        daily_orig <- fwi(daily_orig, init=init)
+        daily <- rbind(toDaily(inactive), daily_orig, fill=TRUE)
+        daily$STREAM <- 'Revised'
+        daily$FREQUENCY <- 'Daily'
+        df <- rbind(df, daily)
+        CALCULATED[[stn]] <<- df
     }
     hourly <- HOURLY_DATA[[stn]]
     forecasted <- ORIG_FORECAST[[stn]]
@@ -397,13 +423,15 @@ renderPlots <- function(input, output, session)
     
     SIZE <- list(line=0.75, point=2, daily=3)
     
+    df <- rbind(forecasted, actual)
+    
     plotIndex <- function(index, colour)
     {
         return(renderPlot({
             ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
-                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour=colour, shape=16, size=SIZE$point) +
-                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=5, size=SIZE$line) +
-                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour=colour, linetype=3, size=SIZE$line) +
+                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour=colour, shape=16, size=SIZE$point) +
+                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour=colour, linetype=5, size=SIZE$line) +
+                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour=colour, linetype=3, size=SIZE$line) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
         }))
@@ -413,12 +441,12 @@ renderPlots <- function(input, output, session)
     {
         renderPlot({
             ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
-                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(sprintf('D%s', index))), colour='black', shape=16, size=SIZE$daily, na.rm=TRUE) +
-                geom_point(data=actual[TYPE == 'OBS'], aes(y=get(index)), colour='red', shape=16, size=SIZE$daily) +
-                geom_point(data=actual[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=1, size=SIZE$daily, na.rm=TRUE) +
-                geom_line(data=actual[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=5, size=SIZE$line) +
-                geom_point(data=forecasted[TYPE == 'FCST'], aes(y=get(sprintf('D%s', index))), colour='black', shape=8, size=SIZE$daily, na.rm=TRUE) +
-                geom_line(data=forecasted[TYPE == 'FCST'], aes(y=get(index)), colour='red', linetype=3, size=SIZE$line) +
+                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=16, size=SIZE$daily, na.rm=TRUE) +
+                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', shape=16, size=SIZE$daily) +
+                geom_point(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=1, size=SIZE$daily, na.rm=TRUE) +
+                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=5, size=SIZE$line) +
+                geom_point(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=8, size=SIZE$daily, na.rm=TRUE) +
+                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=3, size=SIZE$line) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
         })
