@@ -430,10 +430,12 @@ renderPlots <- function(input, output, session)
     dfoss$FREQUENCY <- 'Daily'
     df <- rbind(df, dfoss)
     
+    ticks <- seq(last_day[[1]], last_day[[2]], 60 * 60 * 6)
+
     plotIndex <- function(index, colour)
     {
         return(renderPlot({
-            ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
+            g <- ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index), shape=factor(TYPE)), colour=colour, size=SIZE$point) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'DFOSS' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=15, size=SIZE$daily, na.rm=TRUE) +
                 geom_point(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=8, size=SIZE$daily, na.rm=TRUE) +
@@ -442,13 +444,18 @@ renderPlots <- function(input, output, session)
                 scale_linetype_manual(name='Stream Type', values=c('Revised'='longdash', 'Original'='dotted')) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
+            if(length(ticks) < 15)
+            {
+                g <- g + scale_x_continuous(breaks=ticks)
+            }
+            return(g)
         }))
     }
     
     plotDaily <- function(index)
     {
         renderPlot({
-            ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
+            g <- ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'DFOSS' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=15, size=SIZE$daily, na.rm=TRUE) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=16, size=SIZE$daily, na.rm=TRUE) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', shape=16, size=SIZE$point, na.rm=TRUE) +
@@ -458,6 +465,11 @@ renderPlots <- function(input, output, session)
                 geom_line(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=3, size=SIZE$line, na.rm=TRUE) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
+            if(length(ticks) < 15)
+            {
+                g <- g + scale_x_continuous(breaks=ticks)
+            }
+            return(g)
         })
     }
 
