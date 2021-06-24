@@ -430,7 +430,12 @@ renderPlots <- function(input, output, session)
     dfoss$FREQUENCY <- 'Daily'
     df <- rbind(df, dfoss)
     
+    MAX_TICKS <- 15
     ticks <- seq(last_day[[1]], last_day[[2]], 60 * 60 * 6)
+    if (length(ticks) > MAX_TICKS)
+    {
+        ticks <- seq(last_day[[1]], last_day[[2]], 60 * 60 * 12)
+    }
 
     plotIndex <- function(index, colour)
     {
@@ -444,7 +449,7 @@ renderPlots <- function(input, output, session)
                 scale_linetype_manual(name='Stream Type', values=c('Revised'='longdash', 'Original'='dotted')) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
-            if(length(ticks) < 15)
+            if(length(ticks) <= MAX_TICKS)
             {
                 g <- g + scale_x_continuous(breaks=ticks)
             }
@@ -465,7 +470,7 @@ renderPlots <- function(input, output, session)
                 geom_line(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=3, size=SIZE$line, na.rm=TRUE) +
                 coord_cartesian(xlim=last_day) +
                 labs(x='TIMESTAMP', y=index, title=index)
-            if(length(ticks) < 15)
+            if(length(ticks) <= MAX_TICKS)
             {
                 g <- g + scale_x_continuous(breaks=ticks)
             }
