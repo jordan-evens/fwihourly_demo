@@ -488,6 +488,10 @@ renderPlots <- function(input, output, session)
     output$isiPlot <- plotDaily('ISI')
     output$buiPlot <- plotDaily('BUI')
     output$fwiPlot <- plotDaily('FWI')
+    output$keep_alive <- renderText({
+        req(input$alive_count)
+        input$alive_count
+    })
 }
 # Define server logic required to draw a histogram
 shinyServer(function(input, output, session) {

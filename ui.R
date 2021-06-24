@@ -26,7 +26,13 @@ stns <- sort(json_stns$features[[1]][[1]])
 stns <- stns[grepl("^[A-Z]*$", stns)]
 # Define UI for application that draws a histogram
 shinyUI(fluidPage(
-
+    tags$script(src = "keepalive.js"),
+    tags$style(HTML("
+        #keep_alive {
+            visibility: hidden;
+        }
+    ")),
+    textOutput("keep_alive"),
     # Application title
     titlePanel("Hourly Data"),
     selectInput("station", "Station", stns),
