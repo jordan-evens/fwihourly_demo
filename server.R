@@ -8,7 +8,6 @@
 #
 
 library(shiny)
-library(cffdrs)
 library(lubridate)
 library(sf)
 library(data.table)
@@ -22,13 +21,13 @@ library(lutz)
 library(stringr)
 
 dir_root <- getwd()
-#source('fwiHourly/hFWI.r')
-#source('diurnal/diurnal.R')
 setwd(paste0(dir_root, '/cffdrs-ng'))
 source('make_minmax.r')
 source('make_hourly.r')
 source('NG_FWI.r')
 setwd(dir_root)
+
+source('old_cffdrs.r')
 
 FLAG_RUN_DEMO <- TRUE
 HOURLY_DATA <- list()
