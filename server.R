@@ -21,46 +21,40 @@ library(suncalc)
 library(lutz)
 library(stringr)
 
-source('fwiHourly/hFWI.r')
-source('diurnal/diurnal.R')
+dir_root <- getwd()
+#source('fwiHourly/hFWI.r')
+#source('diurnal/diurnal.R')
+setwd(paste0(dir_root, '/cffdrs-ng'))
+source('make_minmax.r')
+source('make_hourly.r')
+source('NG_FWI.r')
+setwd(dir_root)
 
+FLAG_RUN_DEMO <- TRUE
 HOURLY_DATA <- list()
 CALCULATED <- list()
 ORIG_FORECAST <- list()
 FORECAST <- list()
 OLD_STN <- ''
 
-cleanWeather <- function(wx)
-{
-    if (!isSequentialHours(wx))
-    {
+cleanWeather <- function(wx) {
+    if (!isSequentialHours(wx)) {
         # need to fix weather
         start <- min(wx$TIMESTAMP)
         end <- max(wx$TIMESTAMP)
+        num_hours <- as.numeric((end - start), units='hours')
         # want to generate all missing hours and then interpolate from nearby readings
-        h <- c(start)
-        cur <- start + hours(1)
-        while (cur <= end)
-        {
-            h <- c(h, cur)
-            cur <- cur + hours(1)
-        }
-        h <- as.data.table(h)
-        colnames(h) <- c('TIMESTAMP')
+        h <- as.data.table(list(TIMESTAMP=start + hours(0:num_hours)))
         wx <- merge(h, wx, by=c('TIMESTAMP'), all=TRUE)
         # should have all the times we need but need to replace NA values in their data
         # fill missing PREC values with 0 so we don't add rain
         wx$PREC <- nafill(wx$PREC, fill=0)
         # just carry observations forward for now
-        for (col in colnames(wx))
-        {
-            if (typeof(wx[[col]]) != 'double' && typeof(wx[[col]]) != 'integer')
-            {
+        for (col in colnames(wx)) {
+            if (typeof(wx[[col]]) != 'double' && typeof(wx[[col]]) != 'integer') {
                 const <- na.omit(unique(wx[[col]]))[1]
                 wx[[col]] <- rep(const)
-            }
-            else
-            {
+            } else {
                 wx[[col]] <- nafill(wx[[col]], type='locf')
             }
         }
@@ -109,7 +103,7 @@ fixTimezone <- function(zone)
 
 getHourly <- function(stn)
 {
-    urlStn <- sprintf("https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/14/query?where=WEATHER_STATION_CODE%%3D'%s'&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=true&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson", stn)
+    urlStn <- sprintf("https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/29/query?where=WEATHER_STATION_CODE%%3D'%s'&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=true&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson", stn)
     #print(urlStn)
     json_cur <- jsonlite::fromJSON(urlStn, flatten=TRUE)
     json_cur <- json_cur$features[order(json_cur$features$attributes.OBSERVATION_DATE),]
@@ -145,31 +139,39 @@ getHourly <- function(stn)
     return(as.data.table(df))
 }
 
-getAFFESForecasts <- function()
-{
+getAFFESForecasts <- function() {
     base_url <- 'http://www.affes.mnr.gov.on.ca/extranet/bulletin_boards/WXProducts/CFS/'
     files <- c('DFOSS_Day1_NWR.txt', 'DFOSS_Day1_NER.txt',
                'DFOSS_Day2_NWR.txt', 'DFOSS_Day2_NER.txt', 
                'DFOSS_Day3.18z.txt', 'DFOSS_Day4.18z.txt', 'DFOSS_Day5.18z.txt')
     data <- NULL
     last_created <- NULL
-    for (f in files)
-    {
+    orig_date <- NULL
+    for (f in files) {
         url <- sprintf('%s%s', base_url, f)
         print(url)
         this_file <- read.csv(url, header=FALSE)
         colnames(this_file) <- c('ID', 'PREC_INTERVAL', 'DATE', 'HR', 'UNK1', 'CREATED', 'UNK2', 'TEMP', 'RH', 'WD', 'WS', 'PREC')
         now <- unique(this_file$CREATED)[[1]]
-        if (is.null(last_created) || now >= last_created)
-        {
+        # FIX: HACK: just force sequential dates for now to get demo running
+        if (FLAG_RUN_DEMO) {
+            if (is.null(orig_date)) {
+                orig_date <- as_date(as_datetime(as.character(this_file$DATE[1]), format='%Y%m%d')) - days(1)
+            }
+            cur_date <- orig_date + days(as.character(substr(f, 10, 10)))
+            print(cur_date)
+            this_file$DATE <- as.integer(format(cur_date, '%Y%m%d'))
+            data <- rbind(data, this_file)
+        } else if (is.null(last_created) || now >= last_created) {
             data <- rbind(data, this_file)
             last_created <- now
         }
     }
     data <- data.table(data)
-    data <- data[!is.na(CREATED)]
-    # FIX: warning about wrapping with as.POSIXct
-    data[, DATE := strptime(DATE, format='%Y%m%d')]
+    if (!FLAG_RUN_DEMO) {
+        data <- data[!is.na(CREATED)]
+    }
+    data[, DATE := as_date(as_datetime(as.character(DATE), format='%Y%m%d'))]
     data[, YR := year(DATE)]
     data[, MON := month(DATE)]
     data[, DAY := day(DATE)]
@@ -179,19 +181,18 @@ getAFFESForecasts <- function()
     return(data)
 }
 
-getAFFESForecast <- function(stn)
-{
-    if (!exists("affes"))
-    {
+getAFFESForecast <- function(stn, tz) {
+    if (!exists("affes")) {
         print('Getting AFFES forecast')
         affes <<- getAFFESForecasts()
     }
-    return(affes[ID == stn])
+    fcst <- affes[ID == stn]
+    fcst$TIMESTAMP <- lubridate::force_tz(fcst$TIMESTAMP, tzone=tz)
+    return(fcst)
 }
 
-getDFOSS <- function(stn)
-{
-    urlStn <- paste0('https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/13/query?where=WEATHER_STATION_CODE+%3D+%27',
+getDFOSS <- function(stn) {
+    urlStn <- paste0('https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/30/query?where=WEATHER_STATION_CODE+%3D+%27',
                   stn,
                   '%27+AND+DFOSS_WEATHER_TYPE%3D%27PM%27&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=false&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson')
     json_cur <- jsonlite::fromJSON(urlStn, flatten=TRUE)
@@ -199,6 +200,9 @@ getDFOSS <- function(stn)
     names(df) <- gsub(names(df), pattern='attributes.', replacement='')
     df$RAINFALL[is.na(df$RAINFALL)] <- 0
     df$ID <- df$WEATHER_STATION_CODE
+    if (is.null(df$ID)) {
+        return(NULL)
+    }
     # find proper time zone
     lat <- df$LAT[[1]]
     long <- df$LONG[[1]]
@@ -226,27 +230,23 @@ getDFOSS <- function(stn)
     return(as.data.table(df))
 }
 
-findQ <- function(TEMP, RH)
-{
+findQ <- function(TEMP, RH) {
     # find absolute humidity
     svp <- 6.108 * exp(17.27 * TEMP / (TEMP + 237.3))
     vp <- svp * RH / 100.0
     return(217 * vp / (273.17 + TEMP))
 }
 
-findRH <- function(q, TEMP)
-{
+findRH <- function(q, TEMP) {
     cur_vp <- (273.17 + TEMP) * q / 217
     return(100 * cur_vp / (6.108 * exp(17.27 * TEMP / (TEMP + 237.3))))
 }
 
-findRHFixed <- function(q, TEMP)
-{
+findRHFixed <- function(q, TEMP) {
     return(pmin(100, pmax(0, findRH(q, TEMP))))
 }
 
-toMinMax <- function(forecast)
-{
+toMinMax <- function(forecast) {
     minMax <- copy(forecast)
     minMax[, Q := findQ(TEMP, RH)]
     minMax[, `:=`(TEMP_MAX = TEMP + 2.1,
@@ -259,8 +259,7 @@ toMinMax <- function(forecast)
     return(minMax)
 }
 
-doForecast <- function(minMax)
-{
+doForecast <- function(minMax) {
     df <- getWx(minMax)
     print('Got weather')
     row_temp <- list(c_alpha=0.03, c_beta=2.14, c_gamma=-2.97)
@@ -280,8 +279,7 @@ doForecast <- function(minMax)
     return(pred)
 }
 
-renderPlots <- function(input, output, session)
-{
+renderPlots <- function(input, output, session) {
     COLS <- c( 'ID', 'LAT', 'LONG', 'TIMESTAMP', 'TEMP', 'RH', 'WS', 'PREC')
     stn <- input$station
     #print(stn)
@@ -289,11 +287,11 @@ renderPlots <- function(input, output, session)
     if (is.null(CALCULATED[[stn]]))
     {
         print(sprintf('Calculating for %s', stn))
-        if (is.null(HOURLY_DATA[[stn]]))
-        {
+        if (is.null(HOURLY_DATA[[stn]])) {
             print(sprintf('Getting hourly data for %s', stn))
             hourly <- getHourly(stn)
             HOURLY_DATA[[stn]] <<- cleanWeather(hourly)
+            # HOURLY_DATA[[stn]] <- cleanWeather(hourly)
         }
         hourly <- HOURLY_DATA[[stn]]
         wx <- hourly[, ..COLS]
@@ -301,42 +299,65 @@ renderPlots <- function(input, output, session)
         lat <- hourly$LAT[[1]]
         long <- hourly$LONG[[1]]
         tz <- hourly$TIMEZONE[[1]]
+        print(tz)
+        timezone <- tz_offset(hourly$TIMESTAMP[1], tz=tz)$utc_offset_h
+        print(timezone)
         print(sprintf("%f, %f => %s", lat, long, tz))
-        forecast <- getAFFESForecast(stn)
+        forecast <- getAFFESForecast(stn, tz)
         print('Got AFFES forecast')
-        if (nrow(forecast) > 0)
-        {
+        if (nrow(forecast) > 0) {
             print('Getting min/max')
-            minMax <- toMinMax(forecast)
-            minMax[, LAT := lat]
-            minMax[, LONG := long]
-            minMax[, TIMEZONE := tz]
-            minMax$HOUR <- minMax$HR
-            minMax$DATE <- as.character(minMax$DATE)
+            fcst_affes <- copy(forecast)
+            colnames(fcst_affes) <- tolower(colnames(fcst_affes))
+            setnames(fcst_affes, c('ws', 'yr', 'hr', 'prec'), c('wind', 'year', 'hour', 'rain'))
+            fcst_affes$lat <- lat
+            fcst_affes$long <- long
+            minMax <- daily_to_minmax(fcst_affes)
+            # colnames(minMax) <- toupper(colnames(minMax))
+            #minMax <- toMinMax(forecast)
+            #minMax[, LAT := lat]
+            #minMax[, LONG := long]
+            # minMax[, TIMEZONE := tz]
+            # minMax$HOUR <- minMax$HR
+            # minMax$DATE <- as.character(minMax$DATE)
+            fcst <- minmax_to_hourly(minMax, timezone)
             print('Got min/max')
-            fcst <- doForecast(minMax)
-            fcst[, TIMESTAMP := as.character(TIMESTAMP)]
-            fcst[, TIMESTAMP := as.POSIXct(TIMESTAMP, tz=hourly$TIMEZONE[[1]])]
-            #fcst <- fcst[TIMESTAMP > max(as.Date(wx$TIMESTAMP, tz=tz)),]
-            fcst[, `:=`(LAT = wx$LAT[[1]],
-                     LONG = wx$LONG[[1]])]
-            setnames(fcst,
-                     c('P_TEMP', 'P_RH', 'P_WS', 'P_PREC'),
-                     c('TEMP', 'RH', 'WS', 'PREC'))
+            #fcst <- doForecast(minMax)
+            setnames(fcst, c('year', 'hour', 'wind', 'rain'), c('yr', 'hr', 'ws', 'prec'))
+            #fcst <- fwi(fcst_hourly)
+            colnames(fcst) <- toupper(colnames(fcst))
+            # fcst[, TIMESTAMP := as.character(TIMESTAMP)]
+            # fcst[, TIMESTAMP := as.POSIXct(TIMESTAMP, tz=hourly$TIMEZONE[[1]])]
+            # #fcst <- fcst[TIMESTAMP > max(as.Date(wx$TIMESTAMP, tz=tz)),]
+            # fcst[, `:=`(LAT = wx$LAT[[1]],
+            #          LONG = wx$LONG[[1]])]
+            # setnames(fcst,
+            #          c('P_TEMP', 'P_RH', 'P_WS', 'P_PREC'),
+            #          c('TEMP', 'RH', 'WS', 'PREC'))
+            fcst[, TIMESTAMP := make_datetime(YR, MON, DAY, HR, tz=tz)]
             fcst <- fcst[, ..COLS]
             fcst[, TYPE := 'FCST']
+            # FORECAST[[stn]] <- fcst
             FORECAST[[stn]] <<- fcst
             print('Got hourly forecast')
         }
         startup <- dfoss[1]
+        if (is.null(startup)) {
+            # HACK: if no startup data found
+            startup <- data.frame(list(FFMC=FFMC_DEFAULT,
+                                       DMC=DMC_DEFAULT,
+                                       DC=DC_DEFAULT,
+                                       TIMESTAMP=as.Date(min(fcst$TIMESTAMP) - days(1), tzone=tz)))
+        }
         init <- data.frame(ffmc=as.double(startup$FFMC),
-                     dmc=as.double(startup$DMC),
-                     dc=as.double(startup$DC),
-                     lat=lat[[1]])
+                           dmc=as.double(startup$DMC),
+                           dc=as.double(startup$DC),
+                           lat=lat[[1]])
         output$startup <- DT::renderDT(startup,
                                        options=list(dom='t'))
         f <- copy(FORECAST[[stn]])
         f <- f[TIMESTAMP >= (lubridate::force_tz(as.Date(min(TIMESTAMP)), tzone=tz) + hours(min(8, hour(wx[, max(TIMESTAMP)])))),]
+        # w <- rbind(wx[TIMESTAMP < min(f$TIMESTAMP)], f)
         w <- rbind(wx[TIMESTAMP < min(f$TIMESTAMP)], f)
         w[, `:=`(DATE = as.character(as.Date(TIMESTAMP, tz=tz)),
                  YR = year(TIMESTAMP),
@@ -346,7 +367,8 @@ renderPlots <- function(input, output, session)
                  MINUTE = minute(TIMESTAMP))]
         active <- w[DATE > as.Date(startup$TIMESTAMP, tz=tz),]
         inactive <- w[DATE <= as.Date(startup$TIMESTAMP, tz=tz),]
-        x <- hFWI(active, ffmc_old=init$ffmc, dmc_old=init$dmc, dc_old=init$dc)
+        print(active)
+        x <- hFWI(active, timezone=timezone, ffmc_old=init$ffmc, dmc_old=init$dmc, dc_old=init$dc)
         x <- rbind(inactive, x, fill=TRUE)
         x$STREAM <- 'Original'
         x$FREQUENCY <- 'Hourly'
@@ -373,9 +395,17 @@ renderPlots <- function(input, output, session)
         #           daily,
         #           by=c('YR', 'MON', 'DAY', 'HR'),
         #           all.x=TRUE)
+        print("Combining with daily")
+        # HACK: FIX: for now just throw out extra columns
+        keep_cols <- colnames(daily)
+        df <- df[, ..keep_cols]
         df <- rbind(df, daily)
+        # ORIG_FORECAST[[stn]] <- df
         ORIG_FORECAST[[stn]] <<- df
         f <- copy(FORECAST[[stn]])
+        # HACK: FIX: for now just throw out extra columns
+        keep_cols <- colnames(f)
+        wx <- wx[, ..keep_cols]
         w <- rbind(wx, f[TIMESTAMP > max(wx$TIMESTAMP)])
         w[, `:=`(DATE = as.character(as.Date(TIMESTAMP, tz=tz)),
                  YR = year(TIMESTAMP),
@@ -383,9 +413,13 @@ renderPlots <- function(input, output, session)
                  DAY = day(TIMESTAMP),
                  HR = hour(TIMESTAMP),
                  MINUTE = minute(TIMESTAMP))]
+        # HACK: keep to forecast period
+        if (FLAG_RUN_DEMO) {
+            w <- w[TIMESTAMP <= max(fcst$TIMESTAMP)]
+        }
         active <- w[DATE > as.Date(startup$TIMESTAMP, tz=tz),]
         inactive <- w[DATE <= as.Date(startup$TIMESTAMP, tz=tz),]
-        x <- hFWI(active, ffmc_old=init$ffmc, dmc_old=init$dmc, dc_old=init$dc)
+        x <- hFWI(active, timezone=timezone, ffmc_old=init$ffmc, dmc_old=init$dmc, dc_old=init$dc)
         x <- rbind(inactive, x, fill=TRUE)
         x$STREAM <- 'Revised'
         x$FREQUENCY <- 'Hourly'
@@ -402,43 +436,62 @@ renderPlots <- function(input, output, session)
         daily <- rbind(toDaily(inactive), daily_orig, fill=TRUE)
         daily$STREAM <- 'Revised'
         daily$FREQUENCY <- 'Daily'
+        print("Combining with revised")
+        # HACK: FIX: for now just throw out extra columns
+        keep_cols <- colnames(daily)
+        df <- df[, ..keep_cols]
         df <- rbind(df, daily)
+        # CALCULATED[[stn]] <- df
         CALCULATED[[stn]] <<- df
     }
     hourly <- HOURLY_DATA[[stn]]
     forecasted <- ORIG_FORECAST[[stn]]
     actual <- CALCULATED[[stn]]
-    max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
+    fcst <- FORECAST[[stn]]
+    if (FLAG_RUN_DEMO) {
+        max_reading <- min(max(fcst$TIMESTAMP), max(HOURLY_DATA[[stn]]$TIMESTAMP))
+    } else {
+        max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
+    }
     min_reading <- min(HOURLY_DATA[[stn]]$TIMESTAMP)
     tz <- hourly$TIMEZONE[[1]]
     # HACK: convert to character to get tz to work
     since <- as.POSIXct(as.character(as.Date(max_reading) - days(1)), tz=tz)
-    if (OLD_STN != stn || is.null(input$since) || since < as.POSIXct(input$since))
-    {
+    if (as.POSIXct(input$since) > max_reading || OLD_STN != stn || is.null(input$since) || since < as.POSIXct(input$since)) {
+    # if (OLD_STN != stn || is.null(input$since) || since < as.POSIXct(input$since)) {
         updateDateInput(session, "since", value=(since), max=(as.Date(max_reading) - days(1)), min=(min_reading))
     }
     OLD_STN <<- stn
-    last_day <- c(as.POSIXct(as.character(input$since), tz=tz), as.POSIXct(as.Date(max(actual$TIMESTAMP))))
+    # if (FLAG_RUN_DEMO) {
+    #     # last_day <- c(as_date(min(max(actual$TIMESTAMP), as.POSIXct(as.character(input$since), tz=tz))), max(actual$TIMESTAMP))
+    #     last_day <- c(as.POSIXct(as.Date(min(forecast$TIMESTAMP))), max(actual$TIMESTAMP))
+    # } else {
+    last_day <- c(min(min(fcst$TIMESTAMP), as.POSIXct(as.character(input$since), tz=tz)), max(actual$TIMESTAMP))
+        #last_day <- c(as.POSIXct(as.character(input$since), tz=tz), as.POSIXct(as.Date(max(actual$TIMESTAMP))))
+    # }
     #print(x)
-    
+    print(last_day)
+
     SIZE <- list(line=0.75, point=2, daily=3)
-    
+    print("Combining forecasted and actual")
     df <- rbind(forecasted, actual)
-    dfoss$TYPE <- 'OBS'
-    dfoss[, DSR := .dsrCalc(FWI)]
-    dfoss$STREAM <- 'DFOSS'
-    dfoss$FREQUENCY <- 'Daily'
-    df <- rbind(df, dfoss)
+    if (!is.null(dfoss)) {
+        dfoss$TYPE <- 'OBS'
+        dfoss[, DSR := .dsrCalc(FWI)]
+        dfoss$STREAM <- 'DFOSS'
+        dfoss$FREQUENCY <- 'Daily'
+        df <- rbind(df, dfoss)
+    }
     
+    print('Calculating ticks')
     MAX_TICKS <- 15
     ticks <- seq(last_day[[1]], last_day[[2]], 60 * 60 * 6)
-    if (length(ticks) > MAX_TICKS)
-    {
+    if (length(ticks) > MAX_TICKS) {
+        print('Updating ticks')
         ticks <- seq(last_day[[1]], last_day[[2]], 60 * 60 * 12)
     }
-
-    plotIndex <- function(index, colour)
-    {
+    print('Defining plot functions')
+    plotIndex <- function(index, colour) {
         return(renderPlot({
             g <- ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index), shape=factor(TYPE)), colour=colour, size=SIZE$point) +
@@ -456,9 +509,8 @@ renderPlots <- function(input, output, session)
             return(g)
         }))
     }
-    
-    plotDaily <- function(index)
-    {
+
+    plotDaily <- function(index) {
         renderPlot({
             g <- ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
                 geom_point(data=df[TYPE == 'OBS' & STREAM == 'DFOSS' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=15, size=SIZE$daily, na.rm=TRUE) +
@@ -492,6 +544,7 @@ renderPlots <- function(input, output, session)
         req(input$alive_count)
         input$alive_count
     })
+    print('Done')
 }
 # Define server logic required to draw a histogram
 shinyServer(function(input, output, session) {
