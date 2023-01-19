@@ -15,6 +15,7 @@ library(anytime)
 library(stringr)
 library(rvest)
 library(DT)
+library(lubridate)
 urlServer <- "https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer"
 xml_server <- xml2::read_html(urlServer)
 ref <- str_extract((html_nodes(xml_server, xpath=".//ul[contains(., 'Spatial Reference: ')]") %>% html_text())[1], "Spatial Reference: .*")
@@ -38,6 +39,12 @@ shinyUI(fluidPage(
     titlePanel("Hourly Data"),
     selectInput("station", "Station", stns),
     dateInput("since", "Since"),
+    sliderInput("currentTime", "Current Time:",
+                min=as.POSIXct(as_date(lubridate::now())),
+                max=as.POSIXct(as_date(lubridate::now()) + hours(hour(lubridate::now()))),
+                value=as.POSIXct(as_date(lubridate::now()) + hours(hour(lubridate::now()))),
+                timeFormat='%Y-%m-%d %H:00',
+                step=60 * 60),
     DT::dataTableOutput("startup"),
     plotOutput("tempPlot"),
     plotOutput("rhPlot"),

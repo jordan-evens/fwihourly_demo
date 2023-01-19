@@ -25,9 +25,8 @@ setwd(paste0(dir_root, '/cffdrs-ng'))
 source('make_minmax.r')
 source('make_hourly.r')
 source('NG_FWI.r')
-setwd(dir_root)
-
 source('old_cffdrs.r')
+setwd(dir_root)
 
 FLAG_RUN_DEMO <- TRUE
 FAKE_TIME <- NULL
@@ -36,6 +35,7 @@ CALCULATED <- list()
 ORIG_FORECAST <- list()
 FORECAST <- list()
 OLD_STN <- ''
+OLD_TIME <- NULL
 
 cleanWeather <- function(wx) {
     if (!isSequentialHours(wx)) {
@@ -284,8 +284,9 @@ renderPlots <- function(input, output, session) {
     stn <- input$station
     #print(stn)
     dfoss <- getDFOSS(stn)
-    if (is.null(CALCULATED[[stn]]))
+    if (is.null(CALCULATED[[stn]]) || OLD_TIME != input$currentTime)
     {
+        OLD_TIME <<- input$currentTime
         print(sprintf('Calculating for %s', stn))
         if (is.null(HOURLY_DATA[[stn]])) {
             print(sprintf('Getting hourly data for %s', stn))
@@ -305,12 +306,19 @@ renderPlots <- function(input, output, session) {
         print('Got AFFES forecast')
         if (FLAG_RUN_DEMO) {
             if (is.null(FAKE_TIME)) {
+                print("Setting current time")
+                print(forecast$TIMESTAMP[1])
+                updateSliderInput(inputId='currentTime',
+                                  value=as.POSIXct(min(as_date(forecast$TIMESTAMP)) + hours(15), tz=tz),
+                                  min=as.POSIXct(min(as_date(forecast$TIMESTAMP)), tz=tz),
+                                  max=as.POSIXct(max(as_date(forecast$TIMESTAMP)) + hours(24), tz=tz),
+                                  timezone=tz)
                 # pretend we're partway through day 1
-                FAKE_TIME <<- min(forecast$TIMESTAMP) + hours(15)
+                FAKE_TIME <<- input$currentTime
             }
-            hourly <- hourly[TIMESTAMP <= FAKE_TIME, ]
-            HOURLY_DATA[[stn]] <<- hourly
         }
+        FAKE_TIME <<- input$currentTime
+        hourly <- hourly[TIMESTAMP <= FAKE_TIME, ]
         wx <- hourly[, ..COLS]
         wx[, TYPE := 'OBS']
         if (nrow(forecast) > 0) {
@@ -558,4 +566,5 @@ renderPlots <- function(input, output, session) {
 shinyServer(function(input, output, session) {
     observeEvent(input$station, renderPlots(input, output, session))
     observeEvent(input$since, renderPlots(input, output, session))
+    observeEvent(input$currentTime, renderPlots(input, output, session))
 })
