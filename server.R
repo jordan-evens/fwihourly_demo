@@ -30,6 +30,7 @@ setwd(dir_root)
 source('old_cffdrs.r')
 
 FLAG_RUN_DEMO <- TRUE
+FAKE_TIME <- NULL
 HOURLY_DATA <- list()
 CALCULATED <- list()
 ORIG_FORECAST <- list()
@@ -293,8 +294,6 @@ renderPlots <- function(input, output, session) {
             # HOURLY_DATA[[stn]] <- cleanWeather(hourly)
         }
         hourly <- HOURLY_DATA[[stn]]
-        wx <- hourly[, ..COLS]
-        wx[, TYPE := 'OBS']
         lat <- hourly$LAT[[1]]
         long <- hourly$LONG[[1]]
         tz <- hourly$TIMEZONE[[1]]
@@ -304,6 +303,16 @@ renderPlots <- function(input, output, session) {
         print(sprintf("%f, %f => %s", lat, long, tz))
         forecast <- getAFFESForecast(stn, tz)
         print('Got AFFES forecast')
+        if (FLAG_RUN_DEMO) {
+            if (is.null(FAKE_TIME)) {
+                # pretend we're partway through day 1
+                FAKE_TIME <<- min(forecast$TIMESTAMP) + hours(15)
+            }
+            hourly <- hourly[TIMESTAMP <= FAKE_TIME, ]
+            HOURLY_DATA[[stn]] <<- hourly
+        }
+        wx <- hourly[, ..COLS]
+        wx[, TYPE := 'OBS']
         if (nrow(forecast) > 0) {
             print('Getting min/max')
             fcst_affes <- copy(forecast)
