@@ -370,7 +370,8 @@ renderPlots <- function(input, output, session) {
                            dc=as.double(startup$DC),
                            lat=lat[[1]])
         output$startup <- DT::renderDT(startup,
-                                       options=list(dom='t'))
+                                       options=list(dom='t'),
+                                       rownames=FALSE)
         f <- copy(FORECAST[[stn]])
         f <- f[TIMESTAMP >= (lubridate::force_tz(as.Date(min(TIMESTAMP)), tzone=tz) + hours(min(8, hour(wx[, max(TIMESTAMP)])))),]
         # w <- rbind(wx[TIMESTAMP < min(f$TIMESTAMP)], f)
