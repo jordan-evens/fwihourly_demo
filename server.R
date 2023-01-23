@@ -526,6 +526,7 @@ renderPlots <- function(input, output, session) {
                 geom_line(data=df[!is.na(get(index)) & FREQUENCY!='Daily' & TYPE!='OBS'],
                           aes(y=get(index), linetype = STREAM), colour=colour, size=SIZE$line, na.rm=TRUE) +
                 scale_linetype_manual(values=c('Revised'=5, 'Original'=3)) +
+                ylab(index) +
                 xlim(last_day)
             return(g)
         }))
