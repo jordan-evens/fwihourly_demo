@@ -8,6 +8,8 @@
 #
 
 library(shiny)
+library(shinycssloaders)
+library(shinyjs)
 
 library(xml2)
 library(jsonlite)
@@ -16,6 +18,11 @@ library(stringr)
 library(rvest)
 library(DT)
 library(lubridate)
+
+makePlot <- function(id) {
+    withSpinner(tagList(plotOutput(id)))
+}
+
 urlServer <- "https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer"
 xml_server <- xml2::read_html(urlServer)
 ref <- str_extract((html_nodes(xml_server, xpath=".//ul[contains(., 'Spatial Reference: ')]") %>% html_text())[1], "Spatial Reference: .*")
@@ -28,6 +35,7 @@ stns <- stns[grepl("^[A-Z]*$", stns)]
 # stns <- c('ABL', 'BAK')
 # Define UI for application that draws a histogram
 shinyUI(fluidPage(
+    useShinyjs(),
     tags$script(src = "keepalive.js"),
     tags$style(HTML("
         #keep_alive {
@@ -46,14 +54,13 @@ shinyUI(fluidPage(
                 timeFormat='%Y-%m-%d %H:00',
                 step=60 * 60),
     DT::dataTableOutput("startup"),
-    plotOutput("tempPlot"),
-    plotOutput("rhPlot"),
-    plotOutput("wsPlot"),
-    plotOutput("precPlot"),
-    plotOutput("ffmcPlot"),
-    plotOutput("dmcPlot"),
-    plotOutput("dcPlot"),
-    plotOutput("isiPlot"),
-    plotOutput("buiPlot"),
-    plotOutput("fwiPlot")
+    makePlot("rhPlot"),
+    makePlot("wsPlot"),
+    makePlot("precPlot"),
+    makePlot("ffmcPlot"),
+    makePlot("dmcPlot"),
+    makePlot("dcPlot"),
+    makePlot("isiPlot"),
+    makePlot("buiPlot"),
+    makePlot("fwiPlot")
 ))
