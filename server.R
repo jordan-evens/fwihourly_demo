@@ -500,63 +500,47 @@ renderPlots <- function(input, output, session) {
         df <- rbind(df, dfoss)
     }
     
-    print('Calculating ticks')
-    MAX_TICKS <- 15
-    ticks <- seq(last_day[[1]], last_day[[2]], 60 * 60 * 6)
-    if (length(ticks) > MAX_TICKS) {
-        print('Updating ticks')
-        ticks <- seq(last_day[[1]], last_day[[2]], 60 * 60 * 12)
-    }
+    # convert to factors for plotting
+    df$TYPE = as.factor(df$TYPE)
+    df$STREAM = as.factor(df$STREAM)
+    df$FREQUENCY = ordered(df$FREQUENCY)
+    df$TIMESTAMP <- lubridate::force_tz(df$TIMESTAMP, tz)
+    shape_names <- list('OBS_DFOSS'='DFOSS',
+                        'OBS_Revised'='Observed',
+                        'OBS_Original'='Observed',
+                        'FCST_DFOSS'='DFOSS',
+                        'FCST_Revised'='Revised Forecast',
+                        'FCST_Original'='Original Forecast')
+    df$SOURCE <- as.factor(as.vector(unlist(shape_names[df[, paste0(TYPE, '_', STREAM)]])))
+    shape_options <- list('DFOSS'=15, 'Observed'=16, 'Revised Forecast'=1, 'Original Forecast'=8)
+
     print('Defining plot functions')
-    plotIndex <- function(index, colour) {
+    plotIndex <- function(index, colour='red') {
         return(renderPlot({
-            g <- ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
-                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index), shape=factor(TYPE)), colour=colour, size=SIZE$point) +
-                geom_point(data=df[TYPE == 'OBS' & STREAM == 'DFOSS' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=15, size=SIZE$daily, na.rm=TRUE) +
-                geom_point(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=8, size=SIZE$daily, na.rm=TRUE) +
-                scale_shape_manual(name='Reading Type', values=c('OBS'=16, 'FCST'=8)) +
-                geom_line(data=df[TYPE == 'FCST' & FREQUENCY == 'Hourly'], aes(y=get(index), linetype=factor(STREAM)), colour=colour, size=SIZE$line) +
-                scale_linetype_manual(name='Stream Type', values=c('Revised'='longdash', 'Original'='dotted')) +
-                coord_cartesian(xlim=last_day) +
-                labs(x='TIMESTAMP', y=index, title=index)
-            if(length(ticks) <= MAX_TICKS)
-            {
-                g <- g + scale_x_continuous(breaks=ticks)
-            }
+            g <- ggplot(data=df[!is.na(get(index))], aes(x=TIMESTAMP)) +
+                geom_point(data=df[!is.na(get(index)) & (FREQUENCY!='Hourly' | TYPE=='OBS')],
+                           aes(y=get(index), shape=SOURCE, size=FREQUENCY, colour=FREQUENCY), na.rm=TRUE) +
+                scale_shape_manual(values=shape_options) +
+                scale_size_manual(values=c('Daily'=SIZE$daily, 'Hourly'=SIZE$point)) +
+                scale_colour_manual(values=c('Daily'='black', 'Hourly'=colour)) +
+                geom_line(data=df[!is.na(get(index)) & FREQUENCY!='Daily' & TYPE!='OBS'],
+                          aes(y=get(index), linetype = STREAM), colour=colour, size=SIZE$line, na.rm=TRUE) +
+                scale_linetype_manual(values=c('Revised'=5, 'Original'=3)) +
+                xlim(last_day)
             return(g)
         }))
-    }
-
-    plotDaily <- function(index) {
-        renderPlot({
-            g <- ggplot(NULL, aes(x=lubridate::force_tz(TIMESTAMP, tz))) +
-                geom_point(data=df[TYPE == 'OBS' & STREAM == 'DFOSS' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=15, size=SIZE$daily, na.rm=TRUE) +
-                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=16, size=SIZE$daily, na.rm=TRUE) +
-                geom_point(data=df[TYPE == 'OBS' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', shape=16, size=SIZE$point, na.rm=TRUE) +
-                geom_point(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=1, size=SIZE$daily, na.rm=TRUE) +
-                geom_point(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Daily'], aes(y=get(index)), colour='black', shape=8, size=SIZE$daily, na.rm=TRUE) +
-                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Revised' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=5, size=SIZE$line, na.rm=TRUE) +
-                geom_line(data=df[TYPE == 'FCST' & STREAM == 'Original' & FREQUENCY == 'Hourly'], aes(y=get(index)), colour='red', linetype=3, size=SIZE$line, na.rm=TRUE) +
-                coord_cartesian(xlim=last_day) +
-                labs(x='TIMESTAMP', y=index, title=index)
-            if(length(ticks) <= MAX_TICKS)
-            {
-                g <- g + scale_x_continuous(breaks=ticks)
-            }
-            return(g)
-        })
     }
 
     output$tempPlot <- plotIndex('TEMP', 'red')
     output$rhPlot <- plotIndex('RH', 'blue')
     output$wsPlot <- plotIndex('WS', 'green')
     output$precPlot <- plotIndex('PREC', 'blue')
-    output$ffmcPlot <- plotDaily('FFMC')
-    output$dmcPlot <- plotDaily('DMC')
-    output$dcPlot <- plotDaily('DC')
-    output$isiPlot <- plotDaily('ISI')
-    output$buiPlot <- plotDaily('BUI')
-    output$fwiPlot <- plotDaily('FWI')
+    output$ffmcPlot <- plotIndex('FFMC')
+    output$dmcPlot <- plotIndex('DMC')
+    output$dcPlot <- plotIndex('DC')
+    output$isiPlot <- plotIndex('ISI')
+    output$buiPlot <- plotIndex('BUI')
+    output$fwiPlot <- plotIndex('FWI')
     output$keep_alive <- renderText({
         req(input$alive_count)
         input$alive_count
