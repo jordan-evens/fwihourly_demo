@@ -32,6 +32,7 @@ renderPlots <- function(input, output, session) {
     lat <- cached_data$lat
     long <- cached_data$long
     tz <- cached_data$tz
+    timezone <- cached_data$timezone
     # if (is.null(OLD_TIME)) {
     #     OLD_TIME <<- input$currentTime
     # }
@@ -177,25 +178,20 @@ renderPlots <- function(input, output, session) {
         # CALCULATED[[stn]] <- df
         CALCULATED[[stn]] <<- df
 
-        hourly <- HOURLY_DATA[[stn]]
+        # hourly <- HOURLY_DATA[[stn]]
         forecasted <- ORIG_FORECAST[[stn]]
         actual <- CALCULATED[[stn]]
         fcst <- FORECAST[[stn]]
-        if (FLAG_RUN_DEMO) {
-            max_reading <- min(max(fcst$TIMESTAMP), max(HOURLY_DATA[[stn]]$TIMESTAMP))
-        } else {
-            max_reading <- max(HOURLY_DATA[[stn]]$TIMESTAMP)
-        }
-        min_reading <- min(HOURLY_DATA[[stn]]$TIMESTAMP)
-        tz <- hourly$TIMEZONE[[1]]
-        # HACK: convert to character to get tz to work
-        since <- as.POSIXct(as.character(as.Date(max_reading) - days(1)), tz=tz)
-        if (as.POSIXct(input$since) > max_reading || OLD_STN != stn || is.null(input$since) || since < as.POSIXct(input$since)) {
-        # if (OLD_STN != stn || is.null(input$since) || since < as.POSIXct(input$since)) {
-            updateDateInput(session, "since", value=(since), max=(as.Date(max_reading) - days(1)), min=(min_reading))
-        }
+        max_reading <- max(hourly$TIMESTAMP)
+        min_reading <- min(hourly$TIMESTAMP)
+        # tz <- hourly$TIMEZONE[[1]]
+        # # HACK: convert to character to get tz to work
+        # since <- as.POSIXct(as.character(as.Date(max_reading) - days(1)), tz=tz)
+        since <- min(as.POSIXct(input$since, tz=tz), as.POSIXct(as.character(as.Date(max_reading) - days(1)), tz=tz))
+        updateDateInput(session, "since", value=(since), max=(as.Date(max_reading) - days(1)), min=(min_reading))
+        OLD_SINCE <<- since
         OLD_STN <<- stn
-        last_day <- c(min(min(fcst$TIMESTAMP), as.POSIXct(as.character(input$since), tz=tz)), max(actual$TIMESTAMP))
+        last_day <- c(as.POSIXct(as.character(input$since), tz=tz), max(actual$TIMESTAMP))
         print(last_day)
     
         SIZE <- list(line=0.75, point=2, daily=3)
@@ -208,7 +204,7 @@ renderPlots <- function(input, output, session) {
             dfoss$FREQUENCY <- 'Daily'
             df <- rbind(df, dfoss)
         }
-        
+
         # convert to factors for plotting
         df$TYPE = as.factor(df$TYPE)
         df$STREAM = as.factor(df$STREAM)

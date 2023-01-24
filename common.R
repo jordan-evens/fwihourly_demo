@@ -292,5 +292,6 @@ cacheData <- function(stn) {
               'forecast'=forecast,
               'lat'=lat,
               'long'=long,
-              'tz'=tz))
+              'tz'=tz,
+              'timezone'=timezone))
 }

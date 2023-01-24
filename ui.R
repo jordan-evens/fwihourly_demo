@@ -53,7 +53,7 @@ shinyUI(fluidPage(
     # Application title
     titlePanel("Hourly Data"),
     selectInput("station", "Station", stns),
-    dateInput("since", "Since"),
+    dateInput("since", "Since", value=as.Date(time_value - days(1))),
     sliderInput("currentTime", "Current Time:",
                 min=time_min,
                 max=time_max,
