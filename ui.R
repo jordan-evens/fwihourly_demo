@@ -1,12 +1,3 @@
-#
-# This is the user-interface definition of a Shiny web application. You can
-# run the application by clicking 'Run App' above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    http://shiny.rstudio.com/
-#
-
 library(shiny)
 library(shinycssloaders)
 library(shinyjs)
@@ -18,6 +9,8 @@ library(stringr)
 library(rvest)
 library(DT)
 library(lubridate)
+
+source('common.R')
 
 makePlot <- function(id) {
     withSpinner(tagList(plotOutput(id)))
@@ -33,7 +26,21 @@ json_stns <- jsonlite::fromJSON(urlIds)
 stns <- sort(json_stns$features[[1]][[1]])
 stns <- stns[grepl("^[A-Z]*$", stns)]
 # stns <- c('ABL', 'BAK')
-# Define UI for application that draws a histogram
+
+time_min <- as.POSIXct(as_date(lubridate::now()))
+time_max <- as.POSIXct(as_date(lubridate::now()) + hours(hour(lubridate::now())))
+time_value <- as.POSIXct(as_date(lubridate::now()) + hours(hour(lubridate::now())))
+
+if (FLAG_RUN_DEMO) {
+    stn <- stns[[1]]
+    cached_data <- cacheData(stn)
+    tz <- cached_data$tz
+    forecast <- cached_data$forecast
+    time_min <- as.POSIXct(min(as_date(forecast$TIMESTAMP)), tz=tz)
+    time_max <- as.POSIXct(max(as_date(forecast$TIMESTAMP)) + hours(24), tz=tz)
+    time_value <- as.POSIXct(min(as_date(forecast$TIMESTAMP)) + hours(15), tz=tz)
+}
+
 shinyUI(fluidPage(
     useShinyjs(),
     tags$script(src = "keepalive.js"),
@@ -48,9 +55,9 @@ shinyUI(fluidPage(
     selectInput("station", "Station", stns),
     dateInput("since", "Since"),
     sliderInput("currentTime", "Current Time:",
-                min=as.POSIXct(as_date(lubridate::now())),
-                max=as.POSIXct(as_date(lubridate::now()) + hours(hour(lubridate::now()))),
-                value=as.POSIXct(as_date(lubridate::now()) + hours(hour(lubridate::now()))),
+                min=time_min,
+                max=time_max,
+                value=time_value,
                 timeFormat='%Y-%m-%d %H:00',
                 step=60 * 60),
     DT::dataTableOutput("startup"),
