@@ -52,6 +52,8 @@ shinyUI(fluidPage(
     textOutput("keep_alive"),
     # Application title
     titlePanel("Hourly Data"),
+    fluidRow(
+    column(6,
     selectInput("station", "Station", stns),
     dateInput("since", "Since", value=as.Date(time_value - days(1))),
     sliderInput("currentTime", "Current Time:",
@@ -59,7 +61,15 @@ shinyUI(fluidPage(
                 max=time_max,
                 value=time_value,
                 timeFormat='%Y-%m-%d %H:00',
-                step=60 * 60),
+                step=60 * 60)
+    ),
+    column(6,
+    p('This is a demo of how the hourly FWI could work and update through the day.'),
+    p('The "Station" input is the station to graph for. If no hourly data is available for a station at any time, the default FWI "drying day" weather values will be used.'),
+    p('The "Since" input is the time to graph from.'),
+    p('The "Current Time" input is the time to pretend it is currently.'),
+    p('The table shows startup FWI values and date.')
+    )),
     DT::dataTableOutput("startup"),
     makePlot("rhPlot"),
     makePlot("wsPlot"),
