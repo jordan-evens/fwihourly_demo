@@ -18,11 +18,15 @@ source('NG_FWI.r')
 source('old_cffdrs.r')
 setwd(dir_root)
 
-FLAG_RUN_DEMO <- TRUE
+STARTUP <- list()
 HOURLY_DATA <- list()
 CALCULATED <- list()
 ORIG_FORECAST <- list()
 FORECAST <- list()
+DFOSS <- list()
+HOURLY <- list()
+TZ <- list()
+TIMEZONE <- list()
 OLD_STN <- ''
 OLD_TIME <- NULL
 OLD_SINCE <- NULL
@@ -95,7 +99,7 @@ getHourly <- function(stn)
 {
   urlStn <- sprintf("https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/29/query?where=WEATHER_STATION_CODE%%3D'%s'&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=true&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson", stn)
   #print(urlStn)
-  json_cur <- jsonlite::fromJSON(urlStn, flatten=TRUE)
+  json_cur <- jsonlite::fromJSON(rawToChar(curl::curl_fetch_memory(urlStn)$content), flatten=TRUE)
   json_cur <- json_cur$features[order(json_cur$features$attributes.OBSERVATION_DATE),]
   json_cur$attributes.OBSERVATION_DATE <- lubridate::as_datetime(json_cur$attributes.OBSERVATION_DATE / 1000)
   all_stns <- json_cur
@@ -130,44 +134,25 @@ getHourly <- function(stn)
 }
 
 getAFFESForecasts <- function() {
-  base_url <- 'http://www.affes.mnr.gov.on.ca/extranet/bulletin_boards/WXProducts/CFS/'
-  files <- c('DFOSS_Day1_NWR.txt', 'DFOSS_Day1_NER.txt',
-             'DFOSS_Day2_NWR.txt', 'DFOSS_Day2_NER.txt', 
-             'DFOSS_Day3.18z.txt', 'DFOSS_Day4.18z.txt', 'DFOSS_Day5.18z.txt')
+  url_wx <- "https://affes0000prd0210web.blob.core.windows.net/affes/METEOBLUE%20Forecast%20Report.csv?sp=rl&st=2023-09-29T17:15:33Z&se=2025-01-02T02:15:33Z&spr=https&sv=2022-11-02&sr=c&sig=9cs6%2F4NJLNp%2FmK2SzPRaStpZ404BX4M8qCqhhimYTYE%3D"
   data <- NULL
   last_created <- NULL
   orig_date <- NULL
-  for (f in files) {
-    url <- sprintf('%s%s', base_url, f)
-    print(url)
-    this_file <- read.csv(url, header=FALSE)
-    colnames(this_file) <- c('ID', 'PREC_INTERVAL', 'DATE', 'HR', 'UNK1', 'CREATED', 'UNK2', 'TEMP', 'RH', 'WD', 'WS', 'PREC')
-    now <- unique(this_file$CREATED)[[1]]
-    # FIX: HACK: just force sequential dates for now to get demo running
-    if (FLAG_RUN_DEMO) {
-      if (is.null(orig_date)) {
-        orig_date <- as_date(as_datetime(as.character(this_file$DATE[1]), format='%Y%m%d')) - days(1)
-      }
-      cur_date <- orig_date + days(as.character(substr(f, 10, 10)))
-      print(cur_date)
-      this_file$DATE <- as.integer(format(cur_date, '%Y%m%d'))
-      data <- rbind(data, this_file)
-    } else if (is.null(last_created) || now >= last_created) {
-      data <- rbind(data, this_file)
-      last_created <- now
-    }
-  }
-  data <- data.table(data)
-  if (!FLAG_RUN_DEMO) {
-    data <- data[!is.na(CREATED)]
-  }
-  data[, DATE := as_date(as_datetime(as.character(DATE), format='%Y%m%d'))]
+  print(url_wx)
+  data <- data.table(read.csv(url_wx))
+  data[, CREATED_DATE := as.POSIXct(as_datetime(as.character(CREATED_DATE), format='%b %d, %Y %I:%M:%S %p'))]
+  data[, DATE := as.POSIXct(as_datetime(as.character(FCST_TIMESTAMP), format='%b %d, %Y %I:%M:%S %p'))]
   data[, YR := year(DATE)]
   data[, MON := month(DATE)]
   data[, DAY := day(DATE)]
-  data$HR <- 12
-  data$MINUTE <- 0
+  data[, HR := hour(DATE)]
+  data[, MINUTE := minute(DATE)]
   data[, TIMESTAMP := as_datetime(sprintf('%04d-%02d-%02d %02d:%02d:00', YR, MON, DAY, HR, MINUTE))]
+
+
+  setnames(data, c("OFFICIAL_STATION_CODE", "LATITUDE", "LONGITUDE", "TEMPERATURE", "RELATIVEHUMIDITY", "WINDSPEED", "WINDDIRECTION", "PRECIPITATION"), c("ID", "LAT", "LONG", "TEMP", "RH", "WS", "WD", "PREC"))
+  data <- data[, c("ID", "LAT", "LONG", "TIMESTAMP", "TEMP", "RH", "WS", "WD", "PREC")]
+  setorder(data, ID, LAT, LONG, TIMESTAMP)
   return(data)
 }
 
@@ -185,7 +170,7 @@ getDFOSS <- function(stn) {
   urlStn <- paste0('https://ws.lioservices.lrc.gov.on.ca/arcgis1061a/rest/services/MNRF/Ontario_Fires_Map/MapServer/30/query?where=WEATHER_STATION_CODE+%3D+%27',
                    stn,
                    '%27+AND+DFOSS_WEATHER_TYPE%3D%27PM%27&text=&objectIds=&time=&geometry=&geometryType=esriGeometryEnvelope&inSR=&spatialRel=esriSpatialRelIntersects&relationParam=&outFields=*&returnGeometry=false&returnTrueCurves=false&maxAllowableOffset=&geometryPrecision=&outSR=&having=&returnIdsOnly=false&returnCountOnly=false&orderByFields=&groupByFieldsForStatistics=&outStatistics=&returnZ=false&returnM=false&gdbVersion=&historicMoment=&returnDistinctValues=false&resultOffset=&resultRecordCount=&queryByDistance=&returnExtentOnly=false&datumTransformation=&parameterValues=&rangeValues=&quantizationParameters=&f=pjson')
-  json_cur <- jsonlite::fromJSON(urlStn, flatten=TRUE)
+  json_cur <- jsonlite::fromJSON(rawToChar(curl::curl_fetch_memory(urlStn)$content), flatten=TRUE)
   df <- data.frame(json_cur$features)
   names(df) <- gsub(names(df), pattern='attributes.', replacement='')
   df$RAINFALL[is.na(df$RAINFALL)] <- 0
@@ -294,4 +279,8 @@ cacheData <- function(stn) {
               'long'=long,
               'tz'=tz,
               'timezone'=timezone))
+}
+
+.dsrCalc <- function(fwi) {
+  return(0.0272 * (fwi^1.77))
 }
